@@ -1,0 +1,1197 @@
+<title>Raft in Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: lab-bench console. Scenario strip, then cluster diagram beside an inspector + narration rail, the log ledger full width, reference notes last. */
+:root{
+  --bg:#ECEFF3; --surface:#FFFFFF; --surface-2:#F4F6F9; --ink:#16202C; --muted:#586477; --line:#D2D8E1;
+  --accent:#2C57CC; --amber:#B06E08; --danger:#BC3A32; --ok:#23784A;
+  --t0:#D9E4FF; --t0e:#3F66D6; --t1:#FBE3BF; --t1e:#B37310; --t2:#D3EEDC; --t2e:#2E8A55;
+  --t3:#F2D5EC; --t3e:#A9418F; --t4:#E1DBFF; --t4e:#6A55D0; --t5:#CDEDEE; --t5e:#23848A;
+  --font-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E131A; --surface:#151C26; --surface-2:#1A232F; --ink:#E3E8EF; --muted:#94A0B3; --line:#293343;
+    --accent:#7FA2FF; --amber:#E8A94E; --danger:#F07C73; --ok:#62C48A;
+    --t0:#1E2E57; --t0e:#7E9EFF; --t1:#47331A; --t1e:#E8A94E; --t2:#1B3B2A; --t2e:#63C58C;
+    --t3:#44213D; --t3e:#E07FCB; --t4:#2B2656; --t4e:#A897FF; --t5:#173D40; --t5e:#5CC6CB;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E131A; --surface:#151C26; --surface-2:#1A232F; --ink:#E3E8EF; --muted:#94A0B3; --line:#293343;
+  --accent:#7FA2FF; --amber:#E8A94E; --danger:#F07C73; --ok:#62C48A;
+  --t0:#1E2E57; --t0e:#7E9EFF; --t1:#47331A; --t1e:#E8A94E; --t2:#1B3B2A; --t2e:#63C58C;
+  --t3:#44213D; --t3e:#E07FCB; --t4:#2B2656; --t4e:#A897FF; --t5:#173D40; --t5e:#5CC6CB;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--font-body)}
+.wrap{max-width:1200px;margin:0 auto;padding-inline:16px;padding-block:28px 48px;display:grid;gap:18px}
+h1,h2,h3{font-family:var(--font-display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(2rem,5vw,3rem);font-weight:700;letter-spacing:-.01em}
+h2{font-size:1.15rem;font-weight:600}
+h3{font-size:1.05rem;font-weight:600}
+p{margin:0}
+code{font-family:var(--font-mono);font-size:.92em}
+.eyebrow{font:500 .72rem/1.3 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.top{display:grid;gap:8px}
+.lede{max-width:68ch;color:var(--muted);font-size:1.02rem}
+
+/* scenario strip */
+.scenarios{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.scn{all:unset;box-sizing:border-box;cursor:pointer;display:grid;gap:3px;align-content:start;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);min-width:0}
+.scn strong{font:600 1rem/1.2 var(--font-display)}
+.scn span:last-child{color:var(--muted);font-size:.86rem;line-height:1.35}
+.scn:hover{border-color:var(--muted)}
+.scn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.scn[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.scn[aria-pressed="true"] .eyebrow{color:var(--accent)}
+
+/* bench */
+.bench{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:18px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;min-width:0}
+.cluster{display:grid;gap:12px}
+.watch{display:grid;gap:4px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.watch .eyebrow{color:var(--accent)}
+.watch p{max-width:70ch}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+.tgroup{display:flex;flex-wrap:wrap;gap:8px}
+.btn{font:500 .88rem/1 var(--font-body);color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:9px 12px;cursor:pointer}
+.btn:hover:not(:disabled){border-color:var(--muted)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);min-width:76px}
+.btn.ghost{background:transparent}
+.speed{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;padding:0;margin:0}
+.speed legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.speed label{font:500 .8rem/1 var(--font-mono);padding:9px 9px;cursor:pointer;color:var(--muted);border-left:1px solid var(--line)}
+.speed label:first-of-type{border-left:0}
+.speed input{position:absolute;opacity:0;pointer-events:none}
+.speed label:has(input:checked){background:var(--ink);color:var(--surface)}
+.speed label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.svgbox{background:var(--surface-2);border-radius:8px;border:1px solid var(--line)}
+#sim{display:block;width:100%;height:auto;max-height:560px}
+.statusbar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font:500 .82rem/1.3 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.statusbar b{color:var(--ink);font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;border:1px solid currentColor;font:500 .76rem/1 var(--font-mono)}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.chip.ok{color:var(--ok)} .chip.bad{color:var(--danger)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.8rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend svg{width:20px;height:20px;overflow:visible}
+
+/* svg */
+.link{stroke:var(--line);stroke-width:1.2}
+.link.cut{opacity:0}
+.link.dim{stroke-dasharray:3 5}
+#wall line{stroke:var(--danger);stroke-width:2;stroke-dasharray:7 6}
+#wall text{fill:var(--danger);font:600 11px var(--font-mono);letter-spacing:.08em;text-anchor:middle}
+.node{cursor:pointer}
+.node .body{fill:var(--surface);stroke:var(--muted);stroke-width:2;transition:stroke .2s}
+.node.candidate .body{stroke:var(--amber);stroke-width:3}
+.node.leader .body{stroke:var(--accent);stroke-width:4;fill:color-mix(in srgb,var(--accent) 12%,var(--surface))}
+.node.down{opacity:.5}
+.node.down .body{stroke-dasharray:4 4;fill:var(--surface-2)}
+.node .track{fill:none;stroke:var(--line);stroke-width:3}
+.node .timer{fill:none;stroke:var(--muted);stroke-width:3;stroke-linecap:round}
+.node.candidate .timer{stroke:var(--amber)}
+.node.leader .track,.node.leader .timer,.node.down .track,.node.down .timer{display:none}
+.node .sel{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-dasharray:2 5;opacity:0}
+.node.selected .sel{opacity:.75}
+.node .hb{fill:none;stroke:var(--accent);stroke-width:2;opacity:0}
+.node.leader .hb{opacity:.35}
+.node text{fill:var(--ink);text-anchor:middle;pointer-events:none}
+.node .sid{font:600 17px var(--font-mono)}
+.node .sterm{font:500 10.5px var(--font-mono);fill:var(--muted)}
+.node .srole{font:600 11px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;fill:var(--muted)}
+.node.leader .srole{fill:var(--accent)} .node.candidate .srole{fill:var(--amber)} .node.down .srole{fill:var(--danger)}
+.m-rv{fill:var(--amber)}
+.m-rvr-yes{fill:var(--amber);stroke:var(--surface);stroke-width:1.5}
+.m-rvr-no{fill:var(--surface);stroke:var(--amber);stroke-width:2}
+.m-ae{fill:var(--accent)}
+.m-n{fill:var(--surface);font:600 11px var(--font-mono);text-anchor:middle}
+.m-hb{fill:var(--accent)}
+.m-aer-ok{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+.m-aer-no{fill:var(--surface);stroke:var(--danger);stroke-width:2}
+
+/* side rail */
+.side{display:grid;gap:18px;min-width:0}
+.inspector{display:grid;gap:12px}
+.insp-h{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pick{display:flex;gap:6px}
+.pick button{font:600 .8rem/1 var(--font-mono);padding:7px 9px;border-radius:6px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);cursor:pointer}
+.pick button[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.pick button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pill{font:600 .72rem/1 var(--font-mono);text-transform:uppercase;letter-spacing:.07em;padding:5px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.pill.leader{color:var(--accent);border-color:var(--accent)}
+.pill.candidate{color:var(--amber);border-color:var(--amber)}
+.pill.down{color:var(--danger);border-color:var(--danger)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:.88rem}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--font-mono);font-variant-numeric:tabular-nums;text-align:right;min-width:0}
+.repl{font:500 .8rem/1.3 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.repl table{width:100%;border-collapse:collapse}
+.repl th{font-weight:500;text-align:right;padding:4px 0;border-bottom:1px solid var(--line)}
+.repl th:first-child,.repl td:first-child{text-align:left}
+.repl td{text-align:right;padding:4px 0;color:var(--ink)}
+.insp-actions{display:flex;flex-wrap:wrap;gap:8px}
+.narr{display:grid;gap:10px}
+#narr{list-style:none;margin:0;padding:0;max-height:340px;overflow-y:auto;display:grid;gap:0;font-size:.86rem;line-height:1.4}
+#narr li{display:grid;grid-template-columns:64px 1fr;gap:8px;padding:7px 0 7px 10px;border-top:1px solid var(--line);border-left:3px solid transparent}
+#narr li:first-child{border-top:0}
+#narr time{font:500 .74rem/1.6 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+#narr li.elect{border-left-color:var(--amber)}
+#narr li.lead{border-left-color:var(--accent)}
+#narr li.commit{border-left-color:var(--ok)}
+#narr li.warn{border-left-color:var(--danger)}
+#narr li.ops{border-left-color:var(--ink)}
+#narr li.vote,#narr li.client{border-left-color:var(--line)}
+#narr li.fresh{animation:flash .9s ease-out}
+@keyframes flash{from{background:color-mix(in srgb,var(--accent) 14%,transparent)}to{background:transparent}}
+.sv{font-family:var(--font-mono);font-weight:600}
+
+/* logs */
+.logs{display:grid;gap:12px}
+.panel-h{display:grid;gap:4px}
+.panel-h p{color:var(--muted);font-size:.88rem;max-width:80ch}
+.logscroll{overflow-x:auto;padding-bottom:4px}
+#loggrid,.loggrid{display:grid;gap:5px;width:max-content;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.lrow{display:grid;grid-template-columns:84px;grid-auto-flow:column;grid-auto-columns:46px;gap:5px;align-items:stretch}
+.lidx{font-size:.72rem;color:var(--muted);text-align:center}
+.rowh{display:flex;flex-direction:column;justify-content:center;padding-right:6px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.rowh b{font-size:.95rem;color:var(--ink);letter-spacing:0}
+.rowh.leader span{color:var(--accent)} .rowh.candidate span{color:var(--amber)} .rowh.down span{color:var(--danger)}
+.cell{height:44px;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;border:1.5px solid transparent}
+.cell b{font-size:.92rem}
+.cell span{font-size:.68rem;color:var(--muted)}
+.cell.empty{border:1px dashed var(--line);opacity:.6}
+.cell.c{color:var(--ink)}
+.cell.u{background:transparent!important;border-style:dashed}
+.t0{background:var(--t0);border-color:var(--t0e)} .t1{background:var(--t1);border-color:var(--t1e)} .t2{background:var(--t2);border-color:var(--t2e)}
+.t3{background:var(--t3);border-color:var(--t3e)} .t4{background:var(--t4);border-color:var(--t4e)} .t5{background:var(--t5);border-color:var(--t5e)}
+.cell.c.t0,.cell.c.t1,.cell.c.t2,.cell.c.t3,.cell.c.t4,.cell.c.t5{border-color:transparent}
+.lrow.isdown .cell:not(.empty){opacity:.55}
+
+/* notes */
+.notes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;padding-top:8px}
+.note{display:grid;gap:8px;align-content:start;min-width:0}
+.note ul{margin:0;padding-left:18px;display:grid;gap:6px;color:var(--ink);font-size:.92rem}
+.note li::marker{color:var(--muted)}
+.try{grid-column:1/-1;border-top:1px solid var(--line);padding-top:14px;display:grid;gap:8px}
+.try ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 18px;list-style:none;padding:0;margin:0;font-size:.92rem}
+.try li{min-width:0}
+footer{color:var(--muted);font-size:.84rem}
+footer a,.muted a{color:var(--accent)}
+.muted{color:var(--muted);font-size:.86rem}
+
+/* page tabs */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-top:8px}
+.tabs a{font:600 .95rem/1 var(--font-display);color:var(--muted);text-decoration:none;padding:10px 14px 12px;border-bottom:3px solid transparent;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink)}
+.tabs a[aria-current="page"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tabs a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.view{display:grid;gap:18px}
+
+/* learn page */
+.learn{gap:0}
+.intro{display:grid;gap:14px;padding-bottom:24px}
+.toc{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px;counter-reset:toc}
+.toc li{counter-increment:toc}
+.toc a{display:inline-flex;gap:7px;align-items:baseline;font-size:.88rem;color:var(--ink);text-decoration:none;padding:6px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+.toc a::before{content:counter(toc);font:600 .74rem var(--font-mono);color:var(--muted)}
+.toc a:hover{border-color:var(--muted)}
+.chapter{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:20px 32px;align-items:start;padding-block:28px;border-top:1px solid var(--line);scroll-margin-top:12px}
+.chapter.wide{grid-template-columns:minmax(0,1fr)}
+.chapter.wide .copy{max-width:72ch}
+.copy{display:grid;gap:10px;align-content:start;min-width:0}
+.copy h2{font-size:1.6rem;font-weight:700}
+.copy ul{margin:0;padding-left:20px;display:grid;gap:4px}
+.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px;min-width:0;display:grid;gap:10px}
+.fig > svg{display:block;width:100%;height:auto}
+.fig figcaption{font-size:.84rem;color:var(--muted)}
+.seeit{justify-self:start;font:500 .86rem/1.2 var(--font-body);color:var(--accent);background:transparent;border:1px solid var(--accent);border-radius:7px;padding:8px 12px;cursor:pointer}
+.seeit::after{content:" →"}
+.seeit:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.seeit:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.quorum{border-collapse:collapse;font:500 .86rem var(--font-mono);font-variant-numeric:tabular-nums;justify-self:start}
+.quorum th{font:500 .74rem var(--font-mono);color:var(--muted);text-align:right;padding:4px 0 6px 18px;border-bottom:1px solid var(--line)}
+.quorum td{text-align:right;padding:5px 0 5px 18px}
+.quorum th:first-child,.quorum td:first-child{padding-left:0;text-align:left}
+.quorum tr.hl td{color:var(--accent);font-weight:600}
+.roles{display:grid;gap:12px}
+.role{display:grid;gap:3px}
+.role h3,.rpc h3{display:flex;align-items:center;gap:8px}
+.role h3 svg{width:16px;height:16px}
+.role p{color:var(--muted);font-size:.92rem}
+.facts{display:grid;gap:10px;margin:0}
+.facts > div{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;align-items:baseline;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.facts dt{font-size:.86rem;color:var(--muted)}
+.facts dd{margin:0;font:600 1.35rem/1.2 var(--font-mono);text-align:right;font-variant-numeric:tabular-nums}
+.facts dd.small{font-size:.95rem}
+.facts p{grid-column:1/-1;font-size:.86rem;color:var(--muted)}
+.rpcs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.rpc{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;display:grid;gap:10px;align-content:start;min-width:0}
+.rpc h3{font-family:var(--font-mono);font-size:1.05rem}
+.rpc h3 svg{width:18px;height:18px}
+.rpc table{border-collapse:collapse;width:100%;font-size:.88rem}
+.rpc th{font:500 .84rem var(--font-mono);text-align:left;padding:6px 14px 6px 0;border-top:1px solid var(--line);white-space:nowrap;vertical-align:top}
+.rpc td{padding:6px 0;border-top:1px solid var(--line);color:var(--muted)}
+.rpc .reply{font-size:.88rem}
+.rpc .rule{font-size:.88rem;padding:10px 12px;background:var(--surface-2);border-radius:7px}
+.state{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.state > div{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;display:grid;gap:4px;align-content:start;min-width:0}
+.state .sub{font-size:.8rem;color:var(--muted)}
+.state dl{margin:8px 0 0;display:grid;gap:2px}
+.state dt{font:600 .9rem var(--font-mono);margin-top:6px}
+.state dd{margin:0;font-size:.88rem;color:var(--muted)}
+.props{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:16px;margin:0}
+.props > div{display:grid;gap:4px;align-content:start;padding-top:10px;border-top:2px solid var(--ink)}
+.props dt{font:600 1rem var(--font-display)}
+.props dd{margin:0;font-size:.9rem;color:var(--muted)}
+.cta{display:flex;flex-wrap:wrap;gap:16px 32px;align-items:center;justify-content:space-between;padding:22px;margin-top:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.cta > div{display:grid;gap:6px;max-width:60ch}
+.cta h2{font-size:1.5rem}
+a.btn{text-decoration:none;display:inline-block}
+.btn.big{font-size:1rem;padding:13px 20px}
+
+/* learn diagrams */
+.d-box{fill:var(--surface-2);stroke:var(--line);stroke-width:1.5}
+.d-box.lead{stroke:var(--accent);stroke-width:2}
+.d-srv{fill:var(--surface);stroke:var(--line);stroke-width:1.5}
+.d-t{fill:var(--ink);font:500 13px var(--font-body)}
+.d-mono{font-family:var(--font-mono)}
+.d-m{fill:var(--muted);font:500 11px var(--font-mono)}
+.d-ink{fill:var(--ink)}
+.d-l{fill:var(--ink);font:500 12.5px var(--font-body)}
+.d-rt{fill:var(--ink);font:600 14px var(--font-mono)}
+.d-arrow{fill:none;stroke:var(--muted);stroke-width:1.6}
+.d-arrow.ae{stroke:var(--accent)}
+.ah{fill:var(--muted)}
+.d-c1{fill:var(--t1);stroke:var(--t1e)} .d-c2{fill:var(--t2);stroke:var(--t2e)}
+.d-role{fill:var(--surface);stroke-width:2.5}
+.d-role.f{stroke:var(--muted)} .d-role.c{stroke:var(--amber);stroke-width:3}
+.d-role.l{stroke:var(--accent);stroke-width:4;fill:color-mix(in srgb,var(--accent) 12%,var(--surface))}
+.d-el{fill:var(--t1);stroke:var(--amber)}
+.d-no{fill:var(--t0);stroke:var(--accent)}
+
+@media (max-width:900px){
+  .bench{grid-template-columns:minmax(0,1fr)}
+  .scenarios{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .notes,.try ul{grid-template-columns:minmax(0,1fr)}
+  .chapter{grid-template-columns:minmax(0,1fr)}
+  .rpcs,.state{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){ #narr li.fresh{animation:none} }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow">The Raft consensus algorithm</p>
+    <h1>Raft in Motion</h1>
+    <nav class="tabs" aria-label="Pages">
+      <a href="#learn" id="tab-learn">How Raft works</a>
+      <a href="#simulator" id="tab-sim">Simulator</a>
+    </nav>
+  </header>
+
+  <main id="view-learn" class="view learn">
+    <section class="intro">
+      <p class="lede">Raft lets a group of servers act like one reliable machine. They agree on a single ordered log of commands, so every server computes the same result, and the group keeps working as long as most of its servers are up. This page explains each part of Raft. The simulator tab shows the same parts running.</p>
+      <ol class="toc" aria-label="Contents">
+        <li><a href="#c-goal">The goal</a></li>
+        <li><a href="#c-roles">Server roles</a></li>
+        <li><a href="#c-terms">Terms</a></li>
+        <li><a href="#c-timer">Timers and heartbeats</a></li>
+        <li><a href="#c-log">The log</a></li>
+        <li><a href="#c-rpc">The two RPCs</a></li>
+        <li><a href="#c-state">Server state</a></li>
+        <li><a href="#c-safety">Safety guarantees</a></li>
+      </ol>
+    </section>
+
+    <section class="chapter" id="c-goal">
+      <div class="copy">
+        <p class="eyebrow">The goal</p>
+        <h2>A replicated state machine</h2>
+        <p>Each server has three parts: a <strong>consensus module</strong>, a <strong>log</strong> and a <strong>state machine</strong>, such as a key-value store. Clients send commands like <code>x←7</code>. The consensus module makes sure every server's log ends up holding the same commands in the same order.</p>
+        <p>Each state machine applies committed commands from its log in order. Same commands in the same order means the same state on every server. If one server dies, the others have identical data.</p>
+        <p>Raft needs a <strong>majority</strong> (a quorum) to make progress. With 2f+1 servers it survives f failures:</p>
+        <table class="quorum">
+          <thead><tr><th>Servers</th><th>Majority</th><th>Failures tolerated</th></tr></thead>
+          <tbody><tr><td>3</td><td>2</td><td>1</td></tr><tr class="hl"><td>5</td><td>3</td><td>2</td></tr><tr><td>7</td><td>4</td><td>3</td></tr></tbody>
+        </table>
+      </div>
+      <figure class="fig">
+        <svg viewBox="0 0 700 280" role="img" aria-label="A client sends x←7 to the leader S1, which copies it to followers S2 and S3. Each server has a consensus module, a log and a state machine.">
+          <defs><marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+          <rect x="20" y="130" width="90" height="44" rx="8" class="d-box"/>
+          <text x="65" y="157" class="d-t" text-anchor="middle">Client</text>
+          <path d="M110,152 C140,152 140,96 172,96" class="d-arrow ae" marker-end="url(#ah1)"/>
+          <text x="128" y="122" class="d-m" text-anchor="middle">x←7</text>
+          <path d="M240,78 C240,18 600,18 600,78" class="d-arrow ae" marker-end="url(#ah1)"/>
+          <path d="M308,96 L352,96" class="d-arrow ae" marker-end="url(#ah1)"/>
+          <text x="420" y="22" class="d-m" text-anchor="middle">AppendEntries</text>
+          <g>
+            <text x="240" y="56" class="d-m" text-anchor="middle">S1 · leader</text>
+            <rect x="160" y="64" width="160" height="200" rx="10" class="d-srv"/>
+            <rect x="172" y="78" width="136" height="36" rx="6" class="d-box lead"/><text x="240" y="100" class="d-t" text-anchor="middle">Consensus module</text>
+            <text x="172" y="136" class="d-m">log</text>
+            <rect x="172" y="142" width="40" height="28" rx="4" class="d-c1"/><text x="192" y="160" class="d-m d-ink" text-anchor="middle">x←3</text>
+            <rect x="218" y="142" width="40" height="28" rx="4" class="d-c1"/><text x="238" y="160" class="d-m d-ink" text-anchor="middle">y←1</text>
+            <rect x="264" y="142" width="40" height="28" rx="4" class="d-c2"/><text x="284" y="160" class="d-m d-ink" text-anchor="middle">x←7</text>
+            <rect x="172" y="198" width="136" height="52" rx="6" class="d-box"/><text x="240" y="217" class="d-m" text-anchor="middle">state machine</text><text x="240" y="238" class="d-t d-mono" text-anchor="middle">x = 7, y = 1</text>
+          </g>
+          <g>
+            <text x="420" y="56" class="d-m" text-anchor="middle">S2 · follower</text>
+            <rect x="340" y="64" width="160" height="200" rx="10" class="d-srv"/>
+            <rect x="352" y="78" width="136" height="36" rx="6" class="d-box"/><text x="420" y="100" class="d-t" text-anchor="middle">Consensus module</text>
+            <text x="352" y="136" class="d-m">log</text>
+            <rect x="352" y="142" width="40" height="28" rx="4" class="d-c1"/><text x="372" y="160" class="d-m d-ink" text-anchor="middle">x←3</text>
+            <rect x="398" y="142" width="40" height="28" rx="4" class="d-c1"/><text x="418" y="160" class="d-m d-ink" text-anchor="middle">y←1</text>
+            <rect x="444" y="142" width="40" height="28" rx="4" class="d-c2"/><text x="464" y="160" class="d-m d-ink" text-anchor="middle">x←7</text>
+            <rect x="352" y="198" width="136" height="52" rx="6" class="d-box"/><text x="420" y="217" class="d-m" text-anchor="middle">state machine</text><text x="420" y="238" class="d-t d-mono" text-anchor="middle">x = 7, y = 1</text>
+          </g>
+          <g>
+            <text x="600" y="56" class="d-m" text-anchor="middle">S3 · follower</text>
+            <rect x="520" y="64" width="160" height="200" rx="10" class="d-srv"/>
+            <rect x="532" y="78" width="136" height="36" rx="6" class="d-box"/><text x="600" y="100" class="d-t" text-anchor="middle">Consensus module</text>
+            <text x="532" y="136" class="d-m">log</text>
+            <rect x="532" y="142" width="40" height="28" rx="4" class="d-c1"/><text x="552" y="160" class="d-m d-ink" text-anchor="middle">x←3</text>
+            <rect x="578" y="142" width="40" height="28" rx="4" class="d-c1"/><text x="598" y="160" class="d-m d-ink" text-anchor="middle">y←1</text>
+            <rect x="624" y="142" width="40" height="28" rx="4" class="d-c2"/><text x="644" y="160" class="d-m d-ink" text-anchor="middle">x←7</text>
+            <rect x="532" y="198" width="136" height="52" rx="6" class="d-box"/><text x="600" y="217" class="d-m" text-anchor="middle">state machine</text><text x="600" y="238" class="d-t d-mono" text-anchor="middle">x = 7, y = 1</text>
+          </g>
+        </svg>
+        <figcaption>The leader's consensus module copies each client command into every log. Every state machine applies the same commands in the same order and ends in the same state.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter" id="c-roles">
+      <div class="copy">
+        <p class="eyebrow">Component · Server roles</p>
+        <h2>Follower, candidate, leader</h2>
+        <p>Every server is in exactly one of three roles. In normal operation there is one leader and all the others are followers.</p>
+        <div class="roles">
+          <div class="role"><h3><svg viewBox="-8 -8 16 16" aria-hidden="true"><circle r="6" class="d-role f"/></svg>Follower</h3><p>Passive. It answers requests from leaders and candidates and never starts a conversation. If it hears nothing for a while, it becomes a candidate.</p></div>
+          <div class="role"><h3><svg viewBox="-8 -8 16 16" aria-hidden="true"><circle r="6" class="d-role c"/></svg>Candidate</h3><p>Trying to become leader. It votes for itself and asks every other server for a vote.</p></div>
+          <div class="role"><h3><svg viewBox="-8 -8 16 16" aria-hidden="true"><circle r="6" class="d-role l"/></svg>Leader</h3><p>Handles every client request, appends commands to its log, copies them to followers and decides when an entry is committed.</p></div>
+        </div>
+        <button class="seeit" type="button" data-go="election">See it in Scenario 1: First election</button>
+      </div>
+      <figure class="fig">
+        <svg viewBox="0 0 720 272" role="img" aria-label="State diagram: a follower times out and becomes a candidate. A candidate with a majority of votes becomes leader, times out into a new election, or returns to follower when it sees a leader or higher term. A leader returns to follower when it sees a higher term.">
+          <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+          <path d="M14,135 L56,135" class="d-arrow" marker-end="url(#ah2)"/>
+          <text x="14" y="124" class="d-m">start</text>
+          <path d="M150,108 Q235,62 316,106" class="d-arrow" marker-end="url(#ah2)"/>
+          <text x="235" y="70" class="d-l" text-anchor="middle">times out, starts election</text>
+          <path d="M400,108 Q485,62 566,106" class="d-arrow" marker-end="url(#ah2)"/>
+          <text x="485" y="70" class="d-l" text-anchor="middle">gets votes from a majority</text>
+          <path d="M340,90 C318,30 402,30 382,88" class="d-arrow" marker-end="url(#ah2)"/>
+          <text x="360" y="24" class="d-l" text-anchor="middle">times out again, new term</text>
+          <path d="M320,162 Q235,208 154,164" class="d-arrow" marker-end="url(#ah2)"/>
+          <text x="235" y="206" class="d-l" text-anchor="middle">sees a leader or a higher term</text>
+          <path d="M590,180 Q360,300 132,182" class="d-arrow" marker-end="url(#ah2)"/>
+          <text x="360" y="262" class="d-l" text-anchor="middle">sees a higher term</text>
+          <circle cx="110" cy="135" r="50" class="d-role f"/><text x="110" y="140" class="d-rt" text-anchor="middle">Follower</text>
+          <circle cx="360" cy="135" r="50" class="d-role c"/><text x="360" y="140" class="d-rt" text-anchor="middle">Candidate</text>
+          <circle cx="610" cy="135" r="50" class="d-role l"/><text x="610" y="140" class="d-rt" text-anchor="middle">Leader</text>
+        </svg>
+        <figcaption>Role changes. Every server starts as a follower. Seeing a higher term on any message always sends a server back to follower.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter" id="c-terms">
+      <div class="copy">
+        <p class="eyebrow">Component · Terms</p>
+        <h2>Numbered periods of time</h2>
+        <p>Raft splits time into <strong>terms</strong>, numbered 1, 2, 3 and up. Each term starts with an election. If a candidate wins, it leads for the rest of that term. If the vote splits, the term ends with no leader and a new term starts soon after.</p>
+        <p>Terms act as a logical clock. Every message carries the sender's term:</p>
+        <ul>
+          <li>A server that sees a <strong>higher</strong> term adopts it at once. A leader or candidate that sees one steps down to follower.</li>
+          <li>A request with a <strong>lower</strong> term is stale and gets rejected.</li>
+        </ul>
+        <p>This is how a leader that was cut off finds out the world has moved on.</p>
+        <button class="seeit" type="button" data-go="split">See it in Scenario 3: Split vote</button>
+      </div>
+      <figure class="fig">
+        <svg viewBox="0 0 680 140" role="img" aria-label="Timeline of four terms. Terms 1, 2 and 4 each begin with a short election followed by normal operation under a leader. Term 3 is only an election that ends in a split vote.">
+          <defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+          <text x="125" y="38" class="d-t" text-anchor="middle">Term 1</text>
+          <text x="325" y="38" class="d-t" text-anchor="middle">Term 2</text>
+          <text x="460" y="38" class="d-t" text-anchor="middle">Term 3</text>
+          <text x="580" y="38" class="d-t" text-anchor="middle">Term 4</text>
+          <rect x="20" y="48" width="32" height="30" class="d-el"/><rect x="52" y="48" width="178" height="30" class="d-no"/>
+          <rect x="230" y="48" width="32" height="30" class="d-el"/><rect x="262" y="48" width="158" height="30" class="d-no"/>
+          <rect x="420" y="48" width="80" height="30" class="d-el"/>
+          <rect x="500" y="48" width="32" height="30" class="d-el"/><rect x="532" y="48" width="128" height="30" class="d-no"/>
+          <text x="141" y="67" class="d-m d-ink" text-anchor="middle">leader S2</text>
+          <text x="341" y="67" class="d-m d-ink" text-anchor="middle">leader S4</text>
+          <text x="460" y="67" class="d-m d-ink" text-anchor="middle">split vote</text>
+          <text x="596" y="67" class="d-m d-ink" text-anchor="middle">leader S1</text>
+          <path d="M20,96 L660,96" class="d-arrow" marker-end="url(#ah3)"/>
+          <text x="660" y="88" class="d-m" text-anchor="end">time</text>
+          <rect x="20" y="114" width="12" height="12" class="d-el"/><text x="38" y="124" class="d-m">election</text>
+          <rect x="120" y="114" width="12" height="12" class="d-no"/><text x="138" y="124" class="d-m">normal operation with one leader</text>
+        </svg>
+        <figcaption>Each term has at most one leader. Some terms, like term 3 here, end without one.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter" id="c-timer">
+      <div class="copy">
+        <p class="eyebrow">Component · Timers and heartbeats</p>
+        <h2>How servers notice a dead leader</h2>
+        <p>Every follower runs an <strong>election timer</strong>. Each message from the current leader resets it. When the leader has nothing new to send, it still sends empty <code>AppendEntries</code> messages called <strong>heartbeats</strong>, just to say "I'm alive".</p>
+        <p>If the timer runs out, the follower assumes the leader is gone and starts an election. Each timeout is <strong>randomized</strong>, so usually one server times out well before the others, wins and sends heartbeats before anyone else tries. This is what makes split votes rare.</p>
+        <button class="seeit" type="button" data-go="crash">See it in Scenario 2: Leader crash</button>
+      </div>
+      <dl class="facts">
+        <div><dt>Heartbeat interval</dt><dd>50 ms</dd><p>How often the leader contacts each follower in this simulator.</p></div>
+        <div><dt>Election timeout</dt><dd>150–300 ms</dd><p>Picked at random again every time the timer is reset. These are the paper's suggested values.</p></div>
+        <div><dt>Timing rule</dt><dd class="small">broadcast ≪ timeout ≪ MTBF</dd><p>A message round trip must be much shorter than the timeout, and the timeout much shorter than the mean time between failures.</p></div>
+      </dl>
+    </section>
+
+    <section class="chapter" id="c-log">
+      <div class="copy">
+        <p class="eyebrow">Component · The log</p>
+        <h2>Entries, indexes and commitment</h2>
+        <p>The log is a list of <strong>entries</strong>. Each entry has an <strong>index</strong> (its position, starting at 1), the <strong>term</strong> in which a leader created it, and a <strong>command</strong>.</p>
+        <p>An entry is <strong>committed</strong> once the leader that created it has stored it on a majority of servers. A committed entry will never be lost or changed, so the state machine can safely apply it. Each server tracks the highest committed index it knows of as <code>commitIndex</code>.</p>
+        <p>Entries past the commit index can still be overwritten by a later leader. In the figure, index 6 is only on S1 and S2. If S1 crashed now, a new leader could replace it.</p>
+        <button class="seeit" type="button" data-go="partition">See overwriting in Scenario 4: Partition and heal</button>
+      </div>
+      <figure class="fig">
+        <div class="logscroll"><div id="logfig" class="loggrid"></div></div>
+        <figcaption>Leader S1 has stored 7 entries. Index 5 is on S1, S2 and S4, which is 3 of 5 servers, so it is committed (solid). Indexes 6 and 7 are not committed yet (dashed). S5 has just restarted and is still catching up. Colors follow the term.</figcaption>
+      </figure>
+    </section>
+
+    <section class="chapter wide" id="c-rpc">
+      <div class="copy">
+        <p class="eyebrow">Component · The two RPCs</p>
+        <h2>Only two kinds of message</h2>
+        <p>Basic Raft needs only two remote procedure calls. Each has a reply, and every message carries the sender's term.</p>
+      </div>
+      <div class="rpcs">
+        <div class="rpc">
+          <h3><svg viewBox="-8 -8 16 16" aria-hidden="true"><circle r="6.5" class="m-rv"/></svg>RequestVote</h3>
+          <p>Sent by a candidate to every other server to ask for a vote.</p>
+          <table>
+            <tbody>
+              <tr><th>term</th><td>The candidate's term</td></tr>
+              <tr><th>candidateId</th><td>Who is asking</td></tr>
+              <tr><th>lastLogIndex</th><td>Index of the candidate's last log entry</td></tr>
+              <tr><th>lastLogTerm</th><td>Term of that entry</td></tr>
+            </tbody>
+          </table>
+          <p class="reply"><strong>Reply:</strong> <code>term</code>, <code>voteGranted</code></p>
+          <p class="rule"><strong>Grant the vote only if</strong> the server hasn't voted for anyone else this term <em>and</em> the candidate's log is at least as up to date as its own. A log is more up to date if its last entry has a higher term. If the terms are equal, the longer log wins.</p>
+        </div>
+        <div class="rpc">
+          <h3><svg viewBox="-10 -10 20 20" aria-hidden="true"><rect x="-8" y="-8" width="16" height="16" rx="3" class="m-ae"/></svg>AppendEntries</h3>
+          <p>Sent by the leader to copy log entries. With no entries, it is a heartbeat.</p>
+          <table>
+            <tbody>
+              <tr><th>term</th><td>The leader's term</td></tr>
+              <tr><th>leaderId</th><td>So followers can redirect clients</td></tr>
+              <tr><th>prevLogIndex</th><td>Index of the entry just before the new ones</td></tr>
+              <tr><th>prevLogTerm</th><td>Term of that entry</td></tr>
+              <tr><th>entries[]</th><td>New entries to store (empty for a heartbeat)</td></tr>
+              <tr><th>leaderCommit</th><td>The leader's <code>commitIndex</code></td></tr>
+            </tbody>
+          </table>
+          <p class="reply"><strong>Reply:</strong> <code>term</code>, <code>success</code></p>
+          <p class="rule"><strong>Accept only if</strong> the follower has an entry at <code>prevLogIndex</code> with term <code>prevLogTerm</code>. This consistency check means a follower only accepts entries that continue a matching history. On rejection, the leader steps back one entry and tries again.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter wide" id="c-state">
+      <div class="copy">
+        <p class="eyebrow">Component · Server state</p>
+        <h2>What each server remembers</h2>
+        <p>Some state must be saved to disk before the server replies to anyone, because forgetting it after a crash could cause two votes in one term or a lost entry. The rest can be rebuilt. The simulator's inspector shows all of these for whichever server you select.</p>
+      </div>
+      <div class="state">
+        <div><h3>Persistent, on every server</h3><p class="sub">Saved to disk before replying</p>
+          <dl><dt>currentTerm</dt><dd>Latest term the server has seen</dd><dt>votedFor</dt><dd>Who it voted for in that term, if anyone</dd><dt>log[]</dt><dd>The entries</dd></dl></div>
+        <div><h3>Volatile, on every server</h3><p class="sub">Starts at 0 after a restart</p>
+          <dl><dt>commitIndex</dt><dd>Highest entry known to be committed</dd><dt>lastApplied</dt><dd>Highest entry applied to the state machine</dd></dl></div>
+        <div><h3>Volatile, leader only</h3><p class="sub">Reset after each election</p>
+          <dl><dt>nextIndex[]</dt><dd>For each follower, the next index to send</dd><dt>matchIndex[]</dt><dd>For each follower, the highest index known to match</dd></dl></div>
+      </div>
+    </section>
+
+    <section class="chapter wide" id="c-safety">
+      <div class="copy">
+        <p class="eyebrow">Guarantees</p>
+        <h2>Five properties Raft always keeps</h2>
+        <p>The pieces above combine into these guarantees. Together they mean no committed command is ever lost or reordered, whatever crashes or network splits happen.</p>
+      </div>
+      <dl class="props">
+        <div><dt>Election safety</dt><dd>At most one leader per term, because winning needs a majority and each server votes once per term.</dd></div>
+        <div><dt>Leader append-only</dt><dd>A leader never overwrites or deletes entries in its own log. It only adds to it.</dd></div>
+        <div><dt>Log matching</dt><dd>If two logs have an entry with the same index and term, the logs are identical up to that entry. The <code>prevLogIndex</code> check enforces this.</dd></div>
+        <div><dt>Leader completeness</dt><dd>A committed entry is in the log of every later leader. The voting rule makes sure a candidate with an out-of-date log can't win.</dd></div>
+        <div><dt>State machine safety</dt><dd>If one server applies a command at some index, no server ever applies a different command at that index.</dd></div>
+      </dl>
+    </section>
+
+    <section class="cta">
+      <div>
+        <p class="eyebrow">Next</p>
+        <h2>Watch it run</h2>
+        <p>The simulator runs these rules on five servers. Pick a scenario, or crash servers and split the network yourself.</p>
+      </div>
+      <a class="btn primary big" href="#simulator">Open the simulator</a>
+    </section>
+  </main>
+
+  <div id="view-sim" class="view" hidden>
+  <p class="lede">Five servers run the Raft consensus algorithm in your browser. Watch them elect a leader and copy one log to every server. Then crash servers or cut the network and see how Raft protects every committed entry. Timings follow the paper (150–300&nbsp;ms election timeouts). At 1× speed the simulation runs 10× slower than real time.</p>
+
+  <section class="scenarios" aria-label="Scenarios">
+    <button class="scn" data-scn="election" aria-pressed="false"><span class="eyebrow">Scenario 1</span><strong>First election</strong><span>Followers time out and one wins a majority.</span></button>
+    <button class="scn" data-scn="crash" aria-pressed="false"><span class="eyebrow">Scenario 2</span><strong>Leader crash</strong><span>The leader dies, a new one takes over, the old one rejoins.</span></button>
+    <button class="scn" data-scn="split" aria-pressed="false"><span class="eyebrow">Scenario 3</span><strong>Split vote</strong><span>Four candidates at once. Nobody wins, so they retry.</span></button>
+    <button class="scn" data-scn="partition" aria-pressed="false"><span class="eyebrow">Scenario 4</span><strong>Partition and heal</strong><span>Two leaders in different terms. Only one can commit.</span></button>
+  </section>
+
+  <div class="bench">
+    <section class="panel cluster" aria-label="Cluster">
+      <div class="watch">
+        <span class="eyebrow" id="watch-name">Running cluster</span>
+        <p id="watch-text"></p>
+      </div>
+      <div class="toolbar" role="toolbar" aria-label="Simulation controls">
+        <div class="tgroup">
+          <button id="btn-play" class="btn primary" type="button">Pause</button>
+          <button id="btn-step" class="btn" type="button">Step to next event</button>
+        </div>
+        <fieldset class="speed">
+          <legend>Speed</legend>
+          <label><input type="radio" name="speed" id="sp-1" value="0.25">¼×</label>
+          <label><input type="radio" name="speed" id="sp-2" value="0.5">½×</label>
+          <label><input type="radio" name="speed" id="sp-3" value="1" checked>1×</label>
+          <label><input type="radio" name="speed" id="sp-4" value="2">2×</label>
+          <label><input type="radio" name="speed" id="sp-5" value="4">4×</label>
+        </fieldset>
+        <div class="tgroup">
+          <button id="btn-client" class="btn" type="button">Client request</button>
+          <button id="btn-part" class="btn" type="button">Partition network</button>
+          <button id="btn-reset" class="btn ghost" type="button">Reset</button>
+        </div>
+      </div>
+      <div class="svgbox">
+        <svg id="sim" viewBox="0 0 560 430" role="img" aria-label="Diagram of five Raft servers exchanging messages">
+          <g id="links"></g>
+          <g id="wall" visibility="hidden"><line x1="280" y1="40" x2="280" y2="410"></line><text x="280" y="28">NETWORK PARTITION</text></g>
+          <g id="msgs"></g>
+          <g id="nodes"></g>
+        </svg>
+      </div>
+      <div class="statusbar">
+        <span>t = <b id="st-time">0</b> ms</span>
+        <span id="st-leader"></span>
+        <span id="st-safe" class="chip ok">Safety checks passing</span>
+      </div>
+      <div class="legend" aria-label="Legend">
+        <span><svg viewBox="-10 -10 20 20"><circle r="6.5" class="m-rv"/></svg>RequestVote</span>
+        <span><svg viewBox="-10 -10 20 20"><circle r="4.5" class="m-rvr-yes"/></svg>vote granted</span>
+        <span><svg viewBox="-10 -10 20 20"><circle r="4.5" class="m-rvr-no"/></svg>vote refused</span>
+        <span><svg viewBox="-10 -10 20 20"><circle r="4.5" class="m-hb"/></svg>heartbeat</span>
+        <span><svg viewBox="-10 -10 20 20"><rect x="-8" y="-8" width="16" height="16" rx="3" class="m-ae"/><text class="m-n" y="4">2</text></svg>AppendEntries with 2 entries</span>
+        <span><svg viewBox="-10 -10 20 20"><circle r="4.5" class="m-aer-ok"/></svg>append accepted</span>
+        <span><svg viewBox="-10 -10 20 20"><circle r="4.5" class="m-aer-no"/></svg>append rejected</span>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel inspector" aria-label="Server inspector">
+        <div class="insp-h">
+          <div class="pick" id="pick" aria-label="Choose a server"></div>
+          <span id="in-role" class="pill">follower</span>
+        </div>
+        <dl class="kv">
+          <dt>Current term</dt><dd id="in-term"></dd>
+          <dt>Voted for</dt><dd id="in-vote"></dd>
+          <dt>Log</dt><dd id="in-log"></dd>
+          <dt>Commit index</dt><dd id="in-commit"></dd>
+          <dt>Known leader</dt><dd id="in-leader"></dd>
+          <dt>Election timer</dt><dd id="in-timer"></dd>
+        </dl>
+        <div id="in-repl" class="repl"></div>
+        <div class="insp-actions">
+          <button id="btn-crash" class="btn" type="button">Crash server</button>
+          <button id="btn-timeout" class="btn" type="button">Force timeout</button>
+          <button id="btn-here" class="btn" type="button" hidden>Send request here</button>
+        </div>
+      </section>
+      <section class="panel narr" aria-label="Event log">
+        <h2>What just happened</h2>
+        <ol id="narr"></ol>
+      </section>
+    </aside>
+  </div>
+
+  <section class="panel logs" aria-label="Replicated logs">
+    <div class="panel-h">
+      <h2>Replicated logs</h2>
+      <p>Each cell is one log entry, labeled with its term and command. Color follows the term. Solid cells are committed on that server. Dashed cells are stored but not yet known to be committed.</p>
+    </div>
+    <div class="logscroll"><div id="loggrid"></div></div>
+  </section>
+
+  <section class="notes" aria-label="Things to try">
+    <div class="try">
+      <h3>Try this</h3>
+      <ul>
+        <li>Crash two followers. The leader still commits with 3 of 5. Crash a third and commits stop, even though the leader keeps accepting requests.</li>
+        <li>Crash a follower, send a few requests, then restart it. Watch it reject heartbeats until the leader walks <code>nextIndex</code> back.</li>
+        <li>Press Force timeout on a follower while a leader is healthy. Its higher term forces the leader to step down.</li>
+      </ul>
+      <p class="muted">The chip under the diagram checks election safety, log matching and "committed entries never change" while the simulation runs. New to Raft? Read <a href="#learn">How Raft works</a> first.</p>
+    </div>
+  </section>
+  </div>
+
+  <footer>Based on Diego Ongaro and John Ousterhout, <a href="https://raft.github.io/raft.pdf">In Search of an Understandable Consensus Algorithm</a> (2014), Figure 2. Snapshots and membership changes are not simulated.</footer>
+</div>
+
+<script>
+(() => {
+const IDS = [1, 2, 3, 4, 5], MAJ = 3;
+const CFG = { eMin: 150, eMax: 300, hb: 50, latMin: 22, latMax: 42, batch: 4 };
+const SIM_PER_MS = 0.1;               // 1x speed: 1 simulated ms per 10 real ms
+const CX = 280, CY = 212, R = 150;
+const VARS = 'xyzwk';
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let S = null, playing = !reduce, speed = 1, acc = 0, last = performance.now(), selected = 1, scnKey = 'steady';
+let shownEvents = 0, logSig = '', replSig = '', simVisible = false;
+const $ = id => document.getElementById(id);
+
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const b = id => `<span class="sv">S${id}</span>`;
+
+/* ---------- simulation core (Raft paper, Figure 2) ---------- */
+function newSim(seed) {
+  S = { t: 0, rnd: mulberry32(seed), nodes: {}, msgs: [], partition: null, leaders: {}, committed: [], violation: null,
+        script: [], si: 0, slast: 0, ctx: {}, flag: false, events: [], cmd: 0 };
+  for (const id of IDS) {
+    S.nodes[id] = { id, role: 'follower', term: 0, votedFor: null, log: [], commitIndex: 0, alive: true, leaderId: null,
+                    votes: new Set(), nextIndex: {}, matchIndex: {}, hbDue: {}, eDur: 0, eDeadline: 0, lastReject: null, x: CX, y: CY };
+    resetTimer(S.nodes[id]);
+  }
+  const T = targets();
+  for (const id of IDS) { S.nodes[id].x = T[id].x; S.nodes[id].y = T[id].y; }
+}
+function resetTimer(n) { n.eDur = CFG.eMin + Math.floor(S.rnd() * (CFG.eMax - CFG.eMin)); n.eDeadline = S.t + n.eDur; }
+function note(kind, html) { S.events.push({ t: S.t, kind, html }); }
+const lastTerm = n => n.log.length ? n.log[n.log.length - 1].term : 0;
+const upToDate = (lt, li, n) => lt > lastTerm(n) || (lt === lastTerm(n) && li >= n.log.length);
+function canTalk(a, c) { if (!S.partition) return true; return S.partition.some(g => g.has(a) && g.has(c)); }
+function leader() { let best = null; for (const id of IDS) { const n = S.nodes[id]; if (n.alive && n.role === 'leader' && (!best || n.term > best.term)) best = n; } return best; }
+
+function send(from, to, m) {
+  const lat = CFG.latMin + S.rnd() * (CFG.latMax - CFG.latMin);
+  Object.assign(m, { from, to, sent: S.t, arrive: S.t + lat, lost: !canTalk(from, to) });
+  S.msgs.push(m);
+}
+
+function startElection(n) {
+  n.term++; n.role = 'candidate'; n.votedFor = n.id; n.votes = new Set([n.id]); n.leaderId = null; resetTimer(n);
+  note('elect', `${b(n.id)}'s election timer runs out. It starts an election for term ${n.term} and votes for itself.`);
+  for (const p of IDS) if (p !== n.id) send(n.id, p, { type: 'RV', term: n.term, lastIdx: n.log.length, lastTerm: lastTerm(n) });
+}
+
+function becomeLeader(n) {
+  n.role = 'leader'; n.leaderId = n.id;
+  for (const p of IDS) { if (p === n.id) continue; n.nextIndex[p] = n.log.length + 1; n.matchIndex[p] = 0; n.hbDue[p] = S.t; }
+  if (S.leaders[n.term] !== undefined && S.leaders[n.term] !== n.id) S.violation = `Two leaders in term ${n.term}`;
+  S.leaders[n.term] = n.id;
+  note('lead', `${b(n.id)} wins term ${n.term} with ${n.votes.size} of 5 votes and becomes leader.`);
+}
+
+function stepDown(n, term, from) {
+  const was = n.role; n.term = term; n.votedFor = null;
+  if (was !== 'follower') {
+    n.role = 'follower';
+    note('elect', `${b(n.id)} sees term ${term} from ${b(from)} and steps down from ${was} to follower.`);
+    if (was === 'leader') resetTimer(n);
+  }
+}
+
+function sendAE(n, p) {
+  const prevIdx = n.nextIndex[p] - 1;
+  const prevTerm = prevIdx > 0 ? n.log[prevIdx - 1].term : 0;
+  const entries = n.log.slice(prevIdx, prevIdx + CFG.batch).map(e => ({ term: e.term, cmd: e.cmd }));
+  send(n.id, p, { type: 'AE', term: n.term, prevIdx, prevTerm, entries, leaderCommit: n.commitIndex });
+  n.hbDue[p] = S.t + CFG.hb;
+}
+
+function advanceCommit(n) {
+  for (let N = n.log.length; N > n.commitIndex; N--) {
+    if (n.log[N - 1].term !== n.term) break;           // only current-term entries are counted directly
+    let c = 1; for (const p of IDS) if (p !== n.id && n.matchIndex[p] >= N) c++;
+    if (c < MAJ) continue;
+    const from = n.commitIndex + 1;
+    for (let i = from; i <= N; i++) {
+      const e = n.log[i - 1], prev = S.committed[i];
+      if (prev && (prev.term !== e.term || prev.cmd !== e.cmd)) S.violation = `Committed entry ${i} was replaced`;
+      S.committed[i] = { term: e.term, cmd: e.cmd };
+    }
+    const older = n.log.slice(from - 1, N).some(e => e.term < n.term);
+    note('commit', `${b(n.id)} commits ${from === N ? 'index ' + N : 'indexes ' + from + '–' + N}: stored on ${c} of 5 servers.${older ? ' Entries from older terms commit along with it.' : ''}`);
+    n.commitIndex = N;
+    return;
+  }
+}
+
+function handle(n, m) {
+  if (m.term > n.term) stepDown(n, m.term, m.from);
+  if (m.type === 'RV') {
+    let grant = false, why = '';
+    if (m.term < n.term) why = 'stale';
+    else if (n.votedFor === n.id) why = `it is a candidate in term ${n.term} and already voted for itself`;
+    else if (n.votedFor !== null && n.votedFor !== m.from) why = `it already voted for ${b(n.votedFor)} in term ${n.term}`;
+    else if (!upToDate(m.lastTerm, m.lastIdx, n)) why = `${b(m.from)}'s log is behind (last entry term ${m.lastTerm}, index ${m.lastIdx} vs. term ${lastTerm(n)}, index ${n.log.length})`;
+    else grant = true;
+    if (grant) { n.votedFor = m.from; resetTimer(n); note('vote', `${b(n.id)} votes for ${b(m.from)} in term ${n.term}.`); }
+    else if (why !== 'stale') note('vote', `${b(n.id)} refuses ${b(m.from)}: ${why}.`);
+    send(n.id, m.from, { type: 'RVR', term: n.term, granted: grant });
+  } else if (m.type === 'RVR') {
+    if (n.role === 'candidate' && m.term === n.term && m.granted) {
+      n.votes.add(m.from);
+      if (n.votes.size >= MAJ) becomeLeader(n);
+    }
+  } else if (m.type === 'AE') {
+    if (m.term < n.term) { send(n.id, m.from, { type: 'AER', term: n.term, success: false, matchIdx: 0 }); return; }
+    if (n.role === 'candidate') note('elect', `${b(n.id)} hears from leader ${b(m.from)} for term ${m.term} and goes back to follower.`);
+    n.role = 'follower'; n.leaderId = m.from; resetTimer(n);
+    const ok = m.prevIdx === 0 || (m.prevIdx <= n.log.length && n.log[m.prevIdx - 1].term === m.prevTerm);
+    if (!ok) {
+      const key = m.term + ':' + m.prevIdx;
+      if (n.lastReject !== key) {
+        n.lastReject = key;
+        note('warn', m.prevIdx > n.log.length
+          ? `${b(n.id)} rejects entries from ${b(m.from)}: it has nothing at index ${m.prevIdx} yet. The leader backs up and retries.`
+          : `${b(n.id)} rejects entries from ${b(m.from)}: its entry at index ${m.prevIdx} is from term ${n.log[m.prevIdx - 1].term}, not ${m.prevTerm}. The leader backs up and retries.`);
+      }
+      send(n.id, m.from, { type: 'AER', term: n.term, success: false, matchIdx: 0 });
+      return;
+    }
+    let idx = m.prevIdx;
+    for (const e of m.entries) {
+      idx++;
+      if (n.log.length >= idx) {
+        if (n.log[idx - 1].term !== e.term) {
+          const gone = n.log.length - idx + 1;
+          n.log.length = idx - 1;
+          note('warn', `${b(n.id)} deletes ${gone} conflicting entr${gone === 1 ? 'y' : 'ies'} from index ${idx} on and takes ${b(m.from)}'s entries instead.`);
+          n.log.push({ term: e.term, cmd: e.cmd });
+        }
+      } else n.log.push({ term: e.term, cmd: e.cmd });
+    }
+    const lastNew = m.prevIdx + m.entries.length;
+    if (m.leaderCommit > n.commitIndex) n.commitIndex = Math.max(n.commitIndex, Math.min(m.leaderCommit, lastNew));
+    send(n.id, m.from, { type: 'AER', term: n.term, success: true, matchIdx: lastNew });
+  } else if (m.type === 'AER') {
+    if (n.role !== 'leader' || m.term !== n.term) return;
+    if (m.success) {
+      if (m.matchIdx > n.matchIndex[m.from]) n.matchIndex[m.from] = m.matchIdx;
+      n.nextIndex[m.from] = n.matchIndex[m.from] + 1;
+      advanceCommit(n);
+    } else {
+      n.nextIndex[m.from] = Math.max(n.matchIndex[m.from] + 1, n.nextIndex[m.from] - 1);
+      sendAE(n, m.from);
+    }
+  }
+}
+
+function step() {
+  S.t++;
+  const keep = [], due = [];
+  for (const m of S.msgs) {
+    if (m.lost) { if (S.t < m.sent + (m.arrive - m.sent) * 0.55) keep.push(m); }
+    else if (m.arrive <= S.t) due.push(m); else keep.push(m);
+  }
+  S.msgs = keep;
+  for (const m of due) {
+    const n = S.nodes[m.to];
+    if (!n.alive || !canTalk(m.from, m.to)) continue;
+    S.flag = true; handle(n, m);
+  }
+  for (const id of IDS) {
+    const n = S.nodes[id];
+    if (!n.alive) continue;
+    if (n.role === 'leader') { for (const p of IDS) if (p !== id && S.t >= n.hbDue[p]) sendAE(n, p); }
+    else if (S.t >= n.eDeadline) { startElection(n); S.flag = true; }
+  }
+  runScript();
+  if (S.t % 20 === 0) checkInvariants();
+}
+
+function checkInvariants() {
+  if (S.violation) return;
+  const ns = IDS.map(i => S.nodes[i]);
+  for (let a = 0; a < 5; a++) for (let c = a + 1; c < 5; c++) {
+    const A = ns[a].log, B = ns[c].log, L = Math.min(A.length, B.length);
+    let same = 0;
+    for (let i = L; i >= 1; i--) if (A[i - 1].term === B[i - 1].term) { same = i; break; }
+    for (let i = 1; i <= same; i++) if (A[i - 1].term !== B[i - 1].term || A[i - 1].cmd !== B[i - 1].cmd) {
+      S.violation = `Log matching broken between S${a + 1} and S${c + 1} at index ${i}`; return;
+    }
+  }
+  for (const n of ns) for (let i = 1; i <= Math.min(n.commitIndex, n.log.length); i++) {
+    const k = S.committed[i];
+    if (k && (k.term !== n.log[i - 1].term || k.cmd !== n.log[i - 1].cmd)) { S.violation = `Committed entry ${i} differs on S${n.id}`; return; }
+  }
+}
+
+/* ---------- operator actions ---------- */
+function clientReq(n) {
+  if (!n || !n.alive || n.role !== 'leader') { note('ops', 'No leader is available, so the client request waits. Clients retry after an election.'); return; }
+  const cmd = `${VARS[S.cmd % VARS.length]}←${1 + Math.floor(S.rnd() * 9)}`; S.cmd++;
+  n.log.push({ term: n.term, cmd });
+  note('client', `Client sends <code>${cmd}</code> to ${b(n.id)}. Stored at index ${n.log.length}, term ${n.term}. Not committed yet.`);
+  for (const p of IDS) if (p !== n.id) n.hbDue[p] = S.t;
+}
+function crash(n) {
+  const wasLeader = n.role === 'leader';
+  n.alive = false; n.role = 'follower';
+  note('ops', `${b(n.id)} crashes.${wasLeader ? ' The followers stop getting heartbeats.' : ''}`);
+}
+function restart(n) {
+  n.alive = true; n.role = 'follower'; n.commitIndex = 0; n.leaderId = null; n.votes = new Set(); n.lastReject = null; resetTimer(n);
+  note('ops', `${b(n.id)} restarts. Its term, vote and log survived on disk. Its commit index starts over at 0.`);
+}
+function partition(groupA) {
+  const A = new Set(groupA), B = new Set(IDS.filter(i => !A.has(i)));
+  S.partition = [A, B];
+  for (const m of S.msgs) if (!canTalk(m.from, m.to)) m.lost = true;
+  note('ops', `The network splits: {${[...A].map(i => 'S' + i).join(', ')}} can't reach {${[...B].map(i => 'S' + i).join(', ')}}.`);
+}
+function heal() { S.partition = null; note('ops', 'The network partition heals. Every server can reach every other server again.'); }
+function defaultSplit() { const l = leader(); if (!l) return [1, 2]; return [l.id, IDS.find(i => i !== l.id)]; }
+
+/* ---------- scenarios ---------- */
+function runScript() {
+  while (S.si < S.script.length) {
+    const st = S.script[S.si];
+    const ready = st.after != null ? S.t >= S.slast + st.after : st.when();
+    if (!ready) break;
+    if (st.do) st.do();
+    S.si++; S.slast = S.t;
+  }
+}
+const req = () => clientReq(leader());
+const SCN = {
+  steady: {
+    name: 'Running cluster', seed: 5,
+    script: () => [{ when: () => leader() }, { after: 120, do: req }, { after: 120, do: req }, { after: 120, do: req }],
+    ff: () => S.si >= S.script.length && IDS.every(i => S.nodes[i].commitIndex >= 3),
+    watch: () => { const l = leader(); return l
+      ? `S${l.id} is the leader for term ${l.term}, sending a heartbeat to each follower every 50 ms. Press Client request to add an entry, pick a server to crash it, or start a scenario above.`
+      : 'Press Client request to add an entry, pick a server to crash it, or start a scenario above.'; },
+  },
+  fresh: {
+    name: 'Fresh cluster',
+    watch: () => 'Five followers with random election timers and empty logs. Nothing is scripted. Add client requests, crash servers or cut the network yourself.',
+  },
+  election: {
+    name: 'Scenario 1 · First election', seed: 11,
+    script: () => [{ when: () => leader() }, { after: 250, do: req }, { after: 200, do: req }],
+    watch: () => 'All five servers start as followers with empty logs. The ring around each server is its election timer. The first one to run out becomes a candidate and asks for votes. With 3 votes it becomes leader, and its heartbeats keep everyone else from timing out. Two client requests follow so you can see replication.',
+  },
+  crash: {
+    name: 'Scenario 2 · Leader crash', seed: 23,
+    script: () => [
+      { when: () => leader() },
+      { after: 200, do: req }, { after: 150, do: req },
+      { when: () => { const l = leader(); return l && l.commitIndex >= 2; } },
+      { after: 250, do: () => { const l = leader(); if (!l) return; S.ctx.old = l.id; S.ctx.oldTerm = l.term; crash(l); } },
+      { when: () => { const l = leader(); return l && l.term > (S.ctx.oldTerm || 0); } },
+      { after: 250, do: req }, { after: 150, do: req },
+      { after: 600, do: () => { if (S.ctx.old && !S.nodes[S.ctx.old].alive) restart(S.nodes[S.ctx.old]); } },
+    ],
+    watch: () => 'A leader gets elected and commits two entries, then crashes. Followers stop hearing heartbeats, one times out and wins a higher term. The new leader commits more entries. Then the old leader restarts and catches up as a follower.',
+  },
+  split: {
+    name: 'Scenario 3 · Split vote', seed: 31,
+    setup: () => { for (const id of [1, 2, 3, 4]) { S.nodes[id].eDur = 120; S.nodes[id].eDeadline = 120; } S.nodes[5].eDur = 290; S.nodes[5].eDeadline = 290; },
+    script: () => [{ when: () => leader() }, { after: 300, do: req }],
+    watch: () => 'S1 to S4 time out on the same tick and all become candidates for term 1. Each has voted for itself, so only S5 has a vote to give. Nobody can reach 3. Their timers are re-randomized, so one of them usually retries first in term 2 and wins.',
+  },
+  partition: {
+    name: 'Scenario 4 · Partition and heal', seed: 47,
+    script: () => [
+      { when: () => leader() },
+      { after: 200, do: req },
+      { when: () => { const l = leader(); return l && l.commitIndex >= 1; } },
+      { after: 200, do: () => { const l = leader(); if (!l) return; S.ctx.old = l.id; S.ctx.oldTerm = l.term; partition(defaultSplit()); } },
+      { after: 150, do: () => clientReq(S.nodes[S.ctx.old]) },
+      { after: 120, do: () => clientReq(S.nodes[S.ctx.old]) },
+      { when: () => IDS.some(i => { const n = S.nodes[i]; return n.alive && n.role === 'leader' && n.term > S.ctx.oldTerm; }) },
+      { after: 200, do: req }, { after: 120, do: req }, { after: 120, do: req },
+      { after: 1000, do: heal },
+    ],
+    watch: () => 'The leader and one follower get cut off from the other three. The old leader keeps accepting requests but can only reach 2 of 5, so nothing commits. The majority side elects a new leader in a higher term and commits its own entries. When the network heals, the old leader steps down and its uncommitted entries are overwritten.',
+  },
+};
+
+function loadScenario(key, seed) {
+  const sc = SCN[key]; scnKey = key;
+  newSim(seed ?? sc.seed ?? Math.floor(Math.random() * 1e9));
+  if (sc.setup) sc.setup();
+  S.script = sc.script ? sc.script() : [];
+  if (sc.ff) { let k = 0; while (k++ < 8000 && !sc.ff()) step(); }
+  acc = 0; shownEvents = 0; logSig = ''; replSig = '';
+  $('narr').innerHTML = '';
+  $('watch-name').textContent = sc.name;
+  $('watch-text').textContent = sc.watch();
+  document.querySelectorAll('.scn').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.scn === key)));
+  const l = leader(); selected = l ? l.id : 1;
+}
+
+/* ---------- rendering ---------- */
+const svgNS = 'http://www.w3.org/2000/svg';
+const nodeEls = {}, linkEls = [];
+function mk(tag, attrs, parent) { const e = document.createElementNS(svgNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; }
+
+function buildSVG() {
+  for (let a = 0; a < 5; a++) for (let c = a + 1; c < 5; c++) linkEls.push({ a: IDS[a], c: IDS[c], el: mk('line', { class: 'link' }, $('links')) });
+  for (const id of IDS) {
+    const g = mk('g', { class: 'node', 'data-id': id }, $('nodes'));
+    mk('circle', { r: 52, class: 'sel' }, g);
+    mk('circle', { r: 44, class: 'hb' }, g);
+    mk('circle', { r: 42, class: 'track' }, g);
+    const timer = mk('circle', { r: 42, class: 'timer', pathLength: 100, transform: 'rotate(-90)' }, g);
+    mk('circle', { r: 34, class: 'body' }, g);
+    mk('text', { class: 'sid', y: -1 }, g).textContent = 'S' + id;
+    const term = mk('text', { class: 'sterm', y: 15 }, g);
+    const role = mk('text', { class: 'srole', y: 64 }, g);
+    g.addEventListener('click', () => select(id));
+    nodeEls[id] = { g, timer, term, role };
+  }
+  const pick = $('pick');
+  for (const id of IDS) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.id = 'pick-' + id; btn.textContent = 'S' + id;
+    btn.addEventListener('click', () => select(id));
+    pick.appendChild(btn);
+  }
+}
+function select(id) { selected = id; replSig = ''; }
+
+function targets() {
+  const T = {};
+  if (!S.partition) IDS.forEach((id, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / 5; T[id] = { x: CX + R * Math.cos(a), y: CY + R * Math.sin(a) }; });
+  else S.partition.forEach((g, gi) => { const arr = [...g].sort(); arr.forEach((id, k) => { T[id] = { x: gi === 0 ? 135 : 425, y: CY + (k - (arr.length - 1) / 2) * 112 }; }); });
+  return T;
+}
+
+function msgSVG(m, tt) {
+  const a = S.nodes[m.from], c = S.nodes[m.to];
+  const dx = c.x - a.x, dy = c.y - a.y, L = Math.hypot(dx, dy) || 1;
+  let p = (tt - m.sent) / (m.arrive - m.sent); p = p < 0 ? 0 : p > 1 ? 1 : p;
+  const s0 = Math.min(0.45, 38 / L), q = s0 + (1 - 2 * s0) * p;
+  const x = a.x + dx * q - dy / L * 7, y = a.y + dy * q + dx / L * 7;
+  const op = m.lost ? (p < 0.38 ? 1 : Math.max(0, 1 - (p - 0.38) / 0.17)) : 1;
+  const tr = `transform="translate(${x.toFixed(1)} ${y.toFixed(1)})" opacity="${op.toFixed(2)}"`;
+  switch (m.type) {
+    case 'RV': return `<g ${tr}><circle r="6.5" class="m-rv"/></g>`;
+    case 'RVR': return `<g ${tr}><circle r="4.5" class="${m.granted ? 'm-rvr-yes' : 'm-rvr-no'}"/></g>`;
+    case 'AE': return m.entries.length
+      ? `<g ${tr}><rect x="-9" y="-9" width="18" height="18" rx="3" class="m-ae"/><text class="m-n" y="4">${m.entries.length}</text></g>`
+      : `<g ${tr}><circle r="4.5" class="m-hb"/></g>`;
+    case 'AER': return `<g ${tr}><circle r="4.5" class="${m.success ? 'm-aer-ok' : 'm-aer-no'}"/></g>`;
+  }
+  return '';
+}
+
+function setText(el, v) { if (el.textContent !== v) el.textContent = v; }
+
+function render(dt) {
+  const tt = S.t + acc;
+  const T = targets(), k = reduce ? 1 : Math.min(1, dt * 0.006);
+  for (const id of IDS) { const n = S.nodes[id]; n.x += (T[id].x - n.x) * k; n.y += (T[id].y - n.y) * k; }
+
+  for (const L of linkEls) {
+    const a = S.nodes[L.a], c = S.nodes[L.c];
+    L.el.setAttribute('x1', a.x.toFixed(1)); L.el.setAttribute('y1', a.y.toFixed(1));
+    L.el.setAttribute('x2', c.x.toFixed(1)); L.el.setAttribute('y2', c.y.toFixed(1));
+    L.el.setAttribute('class', 'link' + (!canTalk(L.a, L.c) ? ' cut' : (!a.alive || !c.alive) ? ' dim' : ''));
+  }
+  $('wall').setAttribute('visibility', S.partition ? 'visible' : 'hidden');
+
+  for (const id of IDS) {
+    const n = S.nodes[id], E = nodeEls[id];
+    const role = n.alive ? n.role : 'down';
+    E.g.setAttribute('transform', `translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})`);
+    E.g.setAttribute('class', `node ${role}${selected === id ? ' selected' : ''}`);
+    setText(E.term, 'term ' + n.term);
+    setText(E.role, role === 'candidate' ? `candidate · ${n.votes.size} vote${n.votes.size === 1 ? '' : 's'}` : role);
+    const f = n.alive && n.role !== 'leader' ? Math.max(0, Math.min(1, (n.eDeadline - tt) / n.eDur)) : 0;
+    E.timer.setAttribute('stroke-dasharray', `${(f * 100).toFixed(2)} 100`);
+  }
+
+  let h = ''; for (const m of S.msgs) h += msgSVG(m, tt);
+  $('msgs').innerHTML = h;
+
+  const l = leader();
+  setText($('st-time'), S.t.toLocaleString('en-US'));
+  $('st-leader').innerHTML = l ? `Leader <b>S${l.id}</b> · term <b>${l.term}</b>` : '<b>No leader</b>';
+  const safe = $('st-safe');
+  if (S.violation) { safe.className = 'chip bad'; setText(safe, 'Safety violation: ' + S.violation); }
+  else { safe.className = 'chip ok'; setText(safe, 'Safety checks passing'); }
+
+  $('btn-client').disabled = !l;
+  setText($('btn-part'), S.partition ? 'Heal partition' : 'Partition network');
+  setText($('btn-play'), playing ? 'Pause' : 'Play');
+
+  renderInspector(tt);
+  renderLogs();
+  renderNarration();
+}
+
+function renderInspector(tt) {
+  const n = S.nodes[selected], role = n.alive ? n.role : 'down';
+  for (const id of IDS) $('pick-' + id).setAttribute('aria-pressed', String(id === selected));
+  const pill = $('in-role'); pill.className = 'pill ' + role; setText(pill, role);
+  setText($('in-term'), String(n.term));
+  setText($('in-vote'), n.votedFor === null ? 'nobody yet' : 'S' + n.votedFor);
+  setText($('in-log'), n.log.length ? `${n.log.length} entr${n.log.length === 1 ? 'y' : 'ies'}, last term ${lastTerm(n)}` : 'empty');
+  setText($('in-commit'), String(n.commitIndex));
+  setText($('in-leader'), !n.alive ? 'n/a' : n.role === 'leader' ? 'itself' : n.leaderId ? 'S' + n.leaderId : 'unknown');
+  setText($('in-timer'), !n.alive ? 'stopped' : n.role === 'leader' ? 'off (sends heartbeats)' : `${Math.max(0, Math.ceil(n.eDeadline - tt))} of ${n.eDur} ms left`);
+
+  let sig = role + '|' + selected;
+  if (n.alive && n.role === 'leader') sig += IDS.map(p => p === n.id ? '' : n.nextIndex[p] + ',' + n.matchIndex[p]).join('|');
+  if (sig !== replSig) {
+    replSig = sig;
+    if (n.alive && n.role === 'leader') {
+      let rows = '';
+      for (const p of IDS) if (p !== n.id) rows += `<tr><td>S${p}${canTalk(n.id, p) && S.nodes[p].alive ? '' : ' (unreachable)'}</td><td>${n.nextIndex[p]}</td><td>${n.matchIndex[p]}</td></tr>`;
+      $('in-repl').innerHTML = `<table><thead><tr><th>Follower</th><th>nextIndex</th><th>matchIndex</th></tr></thead><tbody>${rows}</tbody></table>`;
+    } else $('in-repl').innerHTML = '';
+  }
+  const crashBtn = $('btn-crash');
+  setText(crashBtn, n.alive ? 'Crash server' : 'Restart server');
+  $('btn-timeout').disabled = !n.alive || n.role === 'leader';
+  $('btn-here').hidden = !(n.alive && n.role === 'leader');
+}
+
+function renderLogs() {
+  let sig = '';
+  for (const id of IDS) { const n = S.nodes[id]; sig += `${n.alive ? n.role : 'down'}:${n.commitIndex}:${n.log.map(e => e.term + e.cmd).join(',')}|`; }
+  if (sig === logSig) return;
+  logSig = sig;
+  const maxLen = Math.max(...IDS.map(i => S.nodes[i].log.length));
+  const cols = Math.max(10, maxLen + 2);
+  let h = '<div class="lrow"><div class="lidx" style="text-align:left">index</div>';
+  for (let i = 1; i <= cols; i++) h += `<div class="lidx">${i}</div>`;
+  h += '</div>';
+  for (const id of IDS) {
+    const n = S.nodes[id], role = n.alive ? n.role : 'down';
+    h += `<div class="lrow${n.alive ? '' : ' isdown'}"><div class="rowh ${role}"><b>S${id}</b><span>${role}</span></div>`;
+    for (let i = 1; i <= cols; i++) {
+      const e = n.log[i - 1];
+      if (!e) { h += '<div class="cell empty"></div>'; continue; }
+      const c = i <= n.commitIndex;
+      h += `<div class="cell t${e.term % 6} ${c ? 'c' : 'u'}" title="Index ${i}, term ${e.term}, ${e.cmd}${c ? ', committed' : ', not committed'}"><b>${e.term}</b><span>${e.cmd}</span></div>`;
+    }
+    h += '</div>';
+  }
+  $('loggrid').innerHTML = h;
+}
+
+function renderNarration() {
+  const list = $('narr');
+  if (shownEvents >= S.events.length) return;
+  const initial = shownEvents === 0;
+  const frag = document.createDocumentFragment();
+  for (let i = S.events.length - 1; i >= shownEvents; i--) {
+    const e = S.events[i];
+    const li = document.createElement('li');
+    li.className = e.kind + (initial ? '' : ' fresh');
+    li.innerHTML = `<time>${e.t.toLocaleString('en-US')} ms</time><p>${e.html}</p>`;
+    frag.appendChild(li);
+  }
+  list.insertBefore(frag, list.firstChild);
+  shownEvents = S.events.length;
+  while (list.children.length > 150) list.removeChild(list.lastChild);
+}
+
+/* ---------- loop & controls ---------- */
+function frame(now) {
+  const dt = Math.min(100, now - last); last = now;
+  if (simVisible) {
+    if (playing) { acc += dt * SIM_PER_MS * speed; while (acc >= 1) { step(); acc -= 1; } }
+    render(dt);
+  }
+  requestAnimationFrame(frame);
+}
+
+$('btn-play').addEventListener('click', () => { playing = !playing; });
+$('btn-step').addEventListener('click', () => { playing = false; acc = 0; S.flag = false; let k = 0; while (!S.flag && k++ < 1000) step(); });
+document.querySelectorAll('input[name="speed"]').forEach(r => r.addEventListener('change', () => { speed = parseFloat(r.value); }));
+$('btn-client').addEventListener('click', () => req());
+$('btn-part').addEventListener('click', () => { if (S.partition) heal(); else partition(defaultSplit()); });
+$('btn-reset').addEventListener('click', () => { loadScenario('fresh'); playing = true; });
+$('btn-crash').addEventListener('click', () => { const n = S.nodes[selected]; n.alive ? crash(n) : restart(n); });
+$('btn-timeout').addEventListener('click', () => { const n = S.nodes[selected]; if (!n.alive || n.role === 'leader') return; note('ops', `You force ${b(n.id)}'s election timer to run out.`); n.eDeadline = S.t; });
+$('btn-here').addEventListener('click', () => clientReq(S.nodes[selected]));
+document.querySelectorAll('.scn').forEach(el => el.addEventListener('click', () => { loadScenario(el.dataset.scn); playing = true; }));
+
+/* ---------- pages ---------- */
+function route() {
+  const sim = location.hash === '#simulator';
+  if (sim && !simVisible) { last = performance.now(); acc = 0; }
+  simVisible = sim;
+  $('view-learn').hidden = sim; $('view-sim').hidden = !sim;
+  $('tab-learn').removeAttribute('aria-current'); $('tab-sim').removeAttribute('aria-current');
+  $(sim ? 'tab-sim' : 'tab-learn').setAttribute('aria-current', 'page');
+  const learnAnchor = !sim && location.hash.length > 1 && location.hash !== '#learn';
+  if (!learnAnchor) window.scrollTo(0, 0);
+}
+addEventListener('hashchange', route);
+document.querySelectorAll('.seeit').forEach(el => el.addEventListener('click', () => {
+  loadScenario(el.dataset.go); playing = true;
+  location.hash = 'simulator';
+}));
+
+function buildLogFigure() {
+  const L = [[1, 'x←3'], [1, 'y←1'], [1, 'x←5'], [2, 'z←2'], [3, 'x←7'], [3, 'y←9'], [3, 'w←4']];
+  const rows = [[1, 'leader', 7, 5], [2, 'follower', 6, 5], [3, 'follower', 4, 4], [4, 'follower', 5, 5], [5, 'follower', 2, 0]];
+  let h = '<div class="lrow"><div class="lidx" style="text-align:left">index</div>';
+  for (let i = 1; i <= 7; i++) h += `<div class="lidx">${i}</div>`;
+  h += '</div>';
+  for (const [id, role, len, commit] of rows) {
+    h += `<div class="lrow"><div class="rowh ${role}"><b>S${id}</b><span>${role}</span></div>`;
+    for (let i = 1; i <= 7; i++) {
+      if (i > len) { h += '<div class="cell empty"></div>'; continue; }
+      const [t, cmd] = L[i - 1];
+      h += `<div class="cell t${t % 6} ${i <= commit ? 'c' : 'u'}"><b>${t}</b><span>${cmd}</span></div>`;
+    }
+    h += '</div>';
+  }
+  $('logfig').innerHTML = h;
+}
+
+buildSVG();
+buildLogFigure();
+loadScenario('steady');
+route();
+render(0);
+requestAnimationFrame(frame);
+})();
+</script>
