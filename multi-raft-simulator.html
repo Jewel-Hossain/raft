@@ -1,0 +1,1398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Multi-Raft in Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: same lab-bench console as the single-group simulator. Scenario strip, the store map with its controls,
+   inspector beside the event feed, then the key space and region table, notes last. */
+:root{
+  --bg:#ECEFF3; --surface:#FFFFFF; --surface-2:#F4F6F9; --ink:#16202C; --muted:#586477; --line:#D2D8E1;
+  --accent:#2C57CC; --amber:#B06E08; --danger:#BC3A32; --ok:#23784A;
+  --c0:#3B63D1; --c1:#C26A0A; --c2:#2E8A55; --c3:#B03A8C; --c4:#6A55D0; --c5:#1F8790;
+  --c6:#8A6D1F; --c7:#0F7FB8; --c8:#5E8A16; --c9:#C2417A; --c10:#4B5BA8; --c11:#8B5A3C;
+  --t0:#D9E4FF; --t1:#FBE3BF; --t2:#D3EEDC; --t3:#F2D5EC; --t4:#E1DBFF; --t5:#CDEDEE;
+  --font-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --radius:10px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E131A; --surface:#151C26; --surface-2:#1A232F; --ink:#E3E8EF; --muted:#94A0B3; --line:#293343;
+    --accent:#7FA2FF; --amber:#E8A94E; --danger:#F07C73; --ok:#62C48A;
+    --c0:#7E9EFF; --c1:#F0A24E; --c2:#63C58C; --c3:#E07FCB; --c4:#A897FF; --c5:#5CC6CB;
+    --c6:#D4B85A; --c7:#5BB8EE; --c8:#9ACD5A; --c9:#F08AB4; --c10:#8F9CF0; --c11:#D19A76;
+    --t0:#1E2E57; --t1:#47331A; --t2:#1B3B2A; --t3:#44213D; --t4:#2B2656; --t5:#173D40;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E131A; --surface:#151C26; --surface-2:#1A232F; --ink:#E3E8EF; --muted:#94A0B3; --line:#293343;
+  --accent:#7FA2FF; --amber:#E8A94E; --danger:#F07C73; --ok:#62C48A;
+  --c0:#7E9EFF; --c1:#F0A24E; --c2:#63C58C; --c3:#E07FCB; --c4:#A897FF; --c5:#5CC6CB;
+  --c6:#D4B85A; --c7:#5BB8EE; --c8:#9ACD5A; --c9:#F08AB4; --c10:#8F9CF0; --c11:#D19A76;
+  --t0:#1E2E57; --t1:#47331A; --t2:#1B3B2A; --t3:#44213D; --t4:#2B2656; --t5:#173D40;
+  color-scheme:dark;
+}
+.c0{--rc:var(--c0)} .c1{--rc:var(--c1)} .c2{--rc:var(--c2)} .c3{--rc:var(--c3)} .c4{--rc:var(--c4)} .c5{--rc:var(--c5)}
+.c6{--rc:var(--c6)} .c7{--rc:var(--c7)} .c8{--rc:var(--c8)} .c9{--rc:var(--c9)} .c10{--rc:var(--c10)} .c11{--rc:var(--c11)}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--font-body)}
+.wrap{margin:0 auto;padding-inline:clamp(16px,3vw,48px);padding-block:28px 48px;display:grid;gap:18px}
+h1,h2,h3{font-family:var(--font-display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(2rem,5vw,3rem);font-weight:700;letter-spacing:-.01em}
+h2{font-size:1.15rem;font-weight:600}
+h3{font-size:1.05rem;font-weight:600}
+p{margin:0}
+code{font-family:var(--font-mono);font-size:.92em}
+a{color:var(--accent)}
+.eyebrow{font:500 .72rem/1.3 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.top{display:grid;gap:8px}
+.top-row{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 20px}
+.lede{max-width:78ch;color:var(--muted);font-size:1.02rem}
+.back{font-size:.88rem;text-decoration:none;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink)}
+.back:hover{border-color:var(--muted)}
+
+/* scenario strip */
+.scenarios{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.scn{all:unset;box-sizing:border-box;cursor:pointer;display:grid;gap:3px;align-content:start;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);min-width:0}
+.scn strong{font:600 1rem/1.2 var(--font-display)}
+.scn span:last-child{color:var(--muted);font-size:.84rem;line-height:1.35}
+.scn:hover{border-color:var(--muted)}
+.scn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.scn[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.scn[aria-pressed="true"] .eyebrow{color:var(--accent)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;min-width:0}
+.stage{display:grid;gap:14px}
+.cl-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 16px}
+.cl-title{display:grid;gap:3px;max-width:70ch}
+.cl-title .eyebrow{color:var(--accent)}
+.cl-title h2{font-size:1.45rem;font-weight:700}
+.cl-title p{color:var(--muted);font-size:.9rem}
+.cl-status{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.stat{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);font:500 .76rem/1 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat b{color:var(--ink);font-weight:600}
+.stat.live i{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:livepulse 1.6s ease-out infinite}
+.stat.live{color:var(--ok)}
+.stat.live.paused{color:var(--muted)}
+.stat.live.paused i{background:var(--muted);animation:none}
+@keyframes livepulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 55%,transparent)}100%{box-shadow:0 0 0 7px transparent}}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid color-mix(in srgb,currentColor 35%,transparent);background:color-mix(in srgb,currentColor 8%,transparent);font:500 .76rem/1 var(--font-mono);white-space:nowrap}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.chip.ok{color:var(--ok)} .chip.bad{color:var(--danger)} .chip.warn{color:var(--amber)} .chip.info{color:var(--accent)}
+
+/* toolbar */
+.toolbar{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;padding:10px 12px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line)}
+.tgroup{display:grid;gap:6px}
+.tg-l{font:600 .64rem/1 var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.tg-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.btn{font:500 .88rem/1 var(--font-body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:8px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;justify-content:center}
+.btn:hover:not(:disabled){border-color:var(--muted)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);min-width:96px}
+.btn .i-play{fill:currentColor}
+#btn-full .i-exit,#btn-full[data-on="true"] .i-enter{display:none}
+#btn-full[data-on="true"] .i-exit{display:inline}
+#btn-play[data-state="playing"] .i-play,#btn-play[data-state="paused"] .i-pause{display:none}
+.btn.danger{color:var(--danger)}
+.btn.danger:hover:not(:disabled){background:color-mix(in srgb,var(--danger) 10%,transparent);border-color:var(--danger)}
+.btn.good{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
+.seg{display:flex;padding:2px;margin:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);gap:2px}
+.seg legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.seg label{font:500 .78rem/1 var(--font-mono);padding:7px 8px;cursor:pointer;color:var(--muted);border-radius:6px}
+.seg label:hover{color:var(--ink)}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--ink);color:var(--surface)}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.switch{display:inline-flex;align-items:center;gap:7px;font-size:.84rem;color:var(--ink);cursor:pointer;user-select:none;padding:4px 2px}
+.switch input{appearance:none;margin:0;width:30px;height:17px;border-radius:999px;background:var(--line);position:relative;cursor:pointer;transition:background .2s;flex:none}
+.switch input::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--surface);box-shadow:0 1px 2px rgb(0 0 0 / .25);transition:transform .2s}
+.switch input:checked{background:var(--accent)}
+.switch input:checked::after{transform:translateX(13px)}
+.switch input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* store map */
+.svgbox{position:relative;border-radius:12px;border:1px solid var(--line);background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--accent) 6%,transparent),transparent 65%),radial-gradient(color-mix(in srgb,var(--muted) 26%,transparent) 1px,transparent 1.2px) 0 0/18px 18px,var(--surface-2)}
+#sim{display:block;width:100%;height:auto;max-height:76vh}
+.stage-hint{position:absolute;right:10px;bottom:9px;font:500 .7rem/1 var(--font-mono);color:var(--muted);padding:5px 8px;border-radius:6px;background:color-mix(in srgb,var(--surface) 80%,transparent);pointer-events:none}
+.link{fill:none;stroke:var(--line);stroke-width:1.3}
+.link.cut{stroke:var(--danger);stroke-dasharray:3 6;opacity:.55}
+.store{cursor:pointer}
+.store .sbody{fill:var(--surface);stroke:var(--line);stroke-width:1.5;filter:drop-shadow(0 2px 5px rgb(0 0 0 / .08))}
+.store:hover .sbody{stroke:var(--muted)}
+.store.selected .sbody{stroke:var(--ink);stroke-width:2.2}
+.store.down .sbody{fill:var(--surface-2);stroke-dasharray:6 5;stroke:var(--muted)}
+.store.down .chips{opacity:.38}
+.store.isolated .sbody{stroke:var(--danger);stroke-width:2.2;stroke-dasharray:8 5}
+.store .sname{font:700 17px var(--font-mono);fill:var(--ink)}
+.store .sinfo{font:500 11px var(--font-mono);fill:var(--muted);text-anchor:end}
+.store.down .sinfo,.store.isolated .sinfo{fill:var(--danger);font-weight:600;letter-spacing:.06em}
+.store .sbar{fill:var(--line)}
+.rchip{cursor:pointer;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .2s}
+.rchip rect{fill:var(--surface);stroke:var(--rc);stroke-width:1.8}
+.rchip text{font:600 11px var(--font-mono);fill:var(--rc);text-anchor:middle;pointer-events:none}
+.rchip.leader rect{fill:var(--rc)}
+.rchip.leader text{fill:var(--surface)}
+.rchip.learner rect{stroke-dasharray:3 3;fill:color-mix(in srgb,var(--rc) 6%,var(--surface))}
+.rchip.candidate rect{stroke:var(--amber);stroke-width:2.6;stroke-dasharray:5 3}
+.rchip.candidate text{fill:var(--amber)}
+.rchip.stale rect{fill:color-mix(in srgb,var(--rc) 35%,var(--surface));stroke-dasharray:2 3}
+.rchip .crown{fill:var(--surface)}
+.rchip .ring{fill:none;stroke:var(--ink);stroke-width:1.6;opacity:0}
+.rchip.sel .ring{opacity:.9}
+.rchip.dim{opacity:.4}
+.rchip.fresh{animation:chipin .5s cubic-bezier(.2,.9,.3,1.3)}
+@keyframes chipin{from{opacity:0}to{opacity:1}}
+.env{pointer-events:none}
+.env circle{fill:var(--accent);stroke:var(--surface);stroke-width:1.5}
+.env.e-hb circle{fill:color-mix(in srgb,var(--accent) 45%,var(--surface))}
+.env.e-vote circle{fill:var(--amber)}
+.env.e-snap circle{fill:var(--ok)}
+.env.e-sel circle{stroke:var(--ink);stroke-width:2.2}
+.env text{fill:var(--surface);font:600 9.5px var(--font-mono);text-anchor:middle}
+.env.e-hb text{fill:var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:.8rem;color:var(--muted)}
+.lg-group{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
+.legend span:not(.tg-l){display:inline-flex;align-items:center;gap:6px}
+.legend svg{width:26px;height:20px;overflow:visible}
+
+/* metrics */
+.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.tile{display:grid;gap:4px;align-content:start;padding:10px 12px;border-radius:9px;background:var(--surface-2);min-width:0}
+.tile b{font:600 1.25rem/1.1 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile small{font-size:.74rem;color:var(--muted);line-height:1.3}
+.tl{font:500 .78rem/1.2 var(--font-body);color:var(--muted)}
+.mini{display:flex;align-items:flex-end;gap:5px;height:30px}
+.mini div{flex:1;display:grid;gap:2px;justify-items:center;font:500 .62rem/1 var(--font-mono);color:var(--muted)}
+.mini i{display:block;width:100%;border-radius:3px 3px 0 0;background:var(--accent);min-height:2px;transition:height .3s}
+.mini div.off i{background:var(--danger);opacity:.5}
+
+/* inspector + feed */
+.main{display:grid;gap:18px;align-items:start}
+.main > .stage{align-self:stretch}
+@media (min-width:1500px){
+  .main{grid-template-columns:minmax(0,1fr) minmax(440px,32%)}
+  .main .duo{grid-template-columns:minmax(0,1fr);align-content:start}
+  .main #narr{min-height:360px}
+}
+/* true fullscreen: map on the left, inspector + feed scroll on the right */
+.main:fullscreen{background:var(--bg);padding:14px;gap:14px;overflow:hidden;grid-template-columns:minmax(0,1fr) minmax(400px,30%);height:100vh}
+.main:fullscreen > .stage{overflow:auto;gap:10px}
+.main:fullscreen .duo{grid-template-columns:minmax(0,1fr);max-height:calc(100vh - 28px);overflow:auto;align-content:start}
+.main:fullscreen #sim{max-height:calc(100vh - 340px)}
+@media (max-width:900px){ .main:fullscreen{grid-template-columns:minmax(0,1fr);overflow:auto} .main:fullscreen .duo{max-height:none;overflow:visible} }
+.duo{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:stretch}
+.inspector{--rc:var(--muted);display:grid;gap:14px;align-content:start}
+.insp-h{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:space-between;padding-left:12px;border-left:4px solid var(--rc)}
+.insp-h h2{font:700 1.5rem/1 var(--font-mono);letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+.insp-h p{font-size:.86rem;color:var(--muted);flex-basis:100%}
+.insp-sum{font-size:.92rem;line-height:1.55;padding:10px 12px;border-radius:9px;background:color-mix(in srgb,var(--rc) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--rc) 24%,transparent)}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.isec{display:grid;gap:8px}
+.isec-h{font:600 .68rem/1 var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted);display:flex;align-items:center;gap:8px}
+.isec-h::after{content:"";flex:1;height:1px;background:var(--line)}
+.rlist{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.rlist li{--s:var(--ok);display:grid;grid-template-columns:52px 96px minmax(40px,1fr) auto;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:var(--surface-2);font:500 .78rem/1.2 var(--font-mono);font-variant-numeric:tabular-nums}
+.rlist li.wait{--s:var(--amber)} .rlist li.bad{--s:var(--danger)}
+.rlist button{all:unset;cursor:pointer;font-weight:600}
+.rlist button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.rbar{height:6px;border-radius:999px;background:color-mix(in srgb,var(--muted) 18%,transparent);overflow:hidden}
+.rbar span{display:block;height:100%;border-radius:inherit;background:var(--s);transition:width .3s}
+.rnote{color:var(--muted);font-size:.72rem;justify-self:end;white-space:nowrap}
+.role{font-size:.72rem;display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+.role::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.role.leader{color:var(--accent)} .role.candidate{color:var(--amber)} .role.learner{color:var(--ok)} .role.down{color:var(--danger)}
+.acts{display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+.acts .tl{flex-basis:100%}
+.logtail{overflow-x:auto;scrollbar-width:thin;padding-bottom:4px}
+.lt{display:grid;gap:4px;width:max-content;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.lt-row{display:grid;grid-template-columns:44px;grid-auto-flow:column;grid-auto-columns:40px;gap:4px;align-items:center}
+.lt-row > span:first-child{font:600 .76rem var(--font-mono);color:var(--muted)}
+.lc{height:34px;border-radius:6px;display:grid;place-items:center;align-content:center;line-height:1.1;font-size:.7rem;border:1.5px solid transparent;color:var(--ink)}
+.lc b{font-size:.8rem}
+.lc small{font-size:.58rem;color:var(--muted)}
+.lc.u{background:transparent!important;border-style:dashed;border-color:var(--muted)}
+.lc.snap{background:repeating-linear-gradient(-45deg,color-mix(in srgb,var(--muted) 18%,transparent) 0 4px,transparent 4px 8px);color:var(--muted)}
+.lc.e{border:1px dashed var(--line)}
+.lc.t0{background:var(--t0)} .lc.t1{background:var(--t1)} .lc.t2{background:var(--t2)} .lc.t3{background:var(--t3)} .lc.t4{background:var(--t4)} .lc.t5{background:var(--t5)}
+.lt-idx{font-size:.62rem;color:var(--muted);text-align:center}
+.narr{display:flex;flex-direction:column;gap:12px;min-height:0}
+.narr-h{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.narr-count{font:500 .74rem/1 var(--font-mono);color:var(--muted)}
+.filters{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px}
+.filters button{flex:none;font:500 .78rem/1 var(--font-body);color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 11px;cursor:pointer}
+.filters button:hover{color:var(--ink);border-color:var(--muted)}
+.filters button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.filters button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#narr{flex:1 1 auto;contain:size;min-height:440px;list-style:none;margin:0;padding:0 4px 2px 0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+#narr > li{--k:var(--muted);display:grid;grid-template-columns:4px minmax(0,1fr);gap:10px;padding:8px 10px 8px 8px;border-radius:9px;background:var(--surface-2)}
+#narr > li::before{content:"";border-radius:2px;background:var(--k)}
+#narr > li.fresh{animation:slidein .45s cubic-bezier(.2,.8,.2,1)}
+#narr .meta{display:flex;justify-content:space-between;gap:8px}
+#narr .tag{font:600 .66rem/1.4 var(--font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--k)}
+#narr time{font:500 .7rem/1.4 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+#narr .msg{font-size:.88rem;line-height:1.45}
+#narr > li.k-elect{--k:var(--amber)} #narr > li.k-lead{--k:var(--accent)} #narr > li.k-place,#narr > li.k-conf{--k:var(--ok)}
+#narr > li.k-split{--k:var(--c4)} #narr > li.k-warn{--k:var(--danger)} #narr > li.k-ops{--k:var(--ink)}
+#narr[data-filter="elect"] > li:not(.k-elect):not(.k-lead),#narr[data-filter="place"] > li:not(.k-place):not(.k-conf),
+#narr[data-filter="split"] > li:not(.k-split),#narr[data-filter="warn"] > li:not(.k-warn),#narr[data-filter="ops"] > li:not(.k-ops){display:none}
+@keyframes slidein{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.sv{display:inline-block;font:600 .78rem/1 var(--font-mono);padding:2px 5px;border-radius:5px;background:var(--surface);border:1px solid var(--line)}
+.rg{display:inline-block;font:600 .78rem/1 var(--font-mono);padding:2px 5px;border-radius:5px;color:var(--rc);background:color-mix(in srgb,var(--rc) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--rc) 40%,transparent)}
+
+/* key space + table */
+.keys{display:grid;gap:14px}
+.keybar{display:flex;height:58px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--surface-2)}
+.kseg{all:unset;box-sizing:border-box;cursor:pointer;min-width:0;display:grid;align-content:center;justify-items:center;gap:2px;padding:0 2px;background:color-mix(in srgb,var(--rc) 16%,var(--surface));border-right:1px solid var(--surface);transition:flex-grow .5s cubic-bezier(.2,.8,.2,1);overflow:hidden}
+.kseg:last-child{border-right:0}
+.kseg b{font:600 .8rem/1 var(--font-mono);color:var(--rc)}
+.kseg small{font:500 .66rem/1 var(--font-mono);color:var(--muted);white-space:nowrap}
+.kseg:hover,.kseg.sel{background:color-mix(in srgb,var(--rc) 30%,var(--surface))}
+.kseg.sel{box-shadow:inset 0 -3px 0 var(--rc)}
+.kseg:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.kseg.noleader{background:repeating-linear-gradient(-45deg,color-mix(in srgb,var(--danger) 16%,var(--surface)) 0 6px,var(--surface) 6px 12px)}
+.kaxis{position:relative;height:28px;font:500 .68rem/1 var(--font-mono);color:var(--muted)}
+.kaxis span{position:absolute;top:2px;transform:translateX(-50%)}
+.kaxis span:first-child{transform:none} .kaxis span:last-child{transform:translateX(-100%)}
+.khot{position:absolute;top:16px;height:8px;border-radius:2px;background:repeating-linear-gradient(-45deg,var(--danger) 0 3px,transparent 3px 6px);opacity:.7}
+.khot-l{position:absolute;top:16px;font:600 .62rem/1 var(--font-mono);color:var(--danger);transform:translateX(8px)}
+.tablewrap{overflow-x:auto}
+table.rt{border-collapse:collapse;width:100%;font-size:.86rem;font-variant-numeric:tabular-nums}
+.rt th{font:500 .7rem var(--font-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.rt td{padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;font-family:var(--font-mono);font-size:.8rem}
+.rt tr.sel td{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.rt tbody tr{cursor:pointer}
+.rt tbody tr:hover td{background:var(--surface-2)}
+.rt .reps{display:flex;gap:4px}
+.rt .rp{padding:2px 5px;border-radius:4px;border:1px solid var(--line);font-size:.72rem;color:var(--muted)}
+.rt .rp.leader{border-color:var(--accent);color:var(--accent);font-weight:600}
+.rt .rp.learner{border-style:dashed;color:var(--ok)}
+.rt .rp.dead{text-decoration:line-through;color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+.rt button{all:unset;cursor:pointer}
+.rt button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* notes */
+.notes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 28px;padding-top:8px}
+.note{display:grid;gap:8px;align-content:start;min-width:0}
+.note p,.note li{font-size:.92rem;color:var(--muted)}
+.note p strong,.note li strong{color:var(--ink)}
+.note ul{margin:0;padding-left:18px;display:grid;gap:6px}
+.try{grid-column:1/-1;border-top:1px solid var(--line);padding-top:14px;display:grid;gap:8px}
+.try ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 18px;list-style:none;padding:0;margin:0;font-size:.92rem}
+footer{color:var(--muted);font-size:.84rem}
+
+@media (max-width:1100px){ .scenarios{grid-template-columns:repeat(3,minmax(0,1fr))} .metrics{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:900px){
+  .duo,.notes,.try ul{grid-template-columns:minmax(0,1fr)}
+  #narr{contain:none;max-height:480px;min-height:0}
+  .scenarios{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:640px){ .stage-hint{display:none} .metrics{grid-template-columns:repeat(2,minmax(0,1fr))} .rlist li{grid-template-columns:44px 84px minmax(30px,1fr)} .rlist .rnote{grid-column:1/-1;justify-self:start} }
+@media (prefers-reduced-motion:reduce){
+  .rchip,.kseg,.rbar span,.mini i{transition:none} .rchip.fresh,#narr > li.fresh{animation:none} .stat.live i{animation:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow">Many Raft groups, one cluster</p>
+    <div class="top-row">
+      <h1>Multi-Raft in Motion</h1>
+      <a class="back" href="raft-visualizer.html">← Single-group Raft simulator</a>
+    </div>
+    <p class="lede">One Raft group can only hold so much data and push so many writes through one leader. Systems like TiKV and CockroachDB cut the key space into <strong>regions</strong> and run a separate Raft group for each one. Five stores below host many groups at once. Each group elects its own leader. A placement driver spreads leaders and replicas, splits regions that grow too big, and repairs groups when a store dies.</p>
+  </header>
+
+  <div class="scenarios" id="scns" role="group" aria-label="Scenarios"></div>
+
+  <div class="main" id="main">
+  <section class="panel stage" aria-label="Cluster">
+    <div class="cl-head">
+      <div class="cl-title">
+        <span class="eyebrow">Scenario</span>
+        <h2 id="scn-name"></h2>
+        <p id="scn-desc"></p>
+      </div>
+      <div class="cl-status">
+        <span class="stat live" id="st-live"><i></i><span id="st-live-t">Running</span></span>
+        <span class="stat">t = <b id="st-time">0</b> ms</span>
+        <span class="stat"><b id="st-regions">0</b> regions</span>
+        <span class="chip ok" id="st-safe">Safety checks pass</span>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="tgroup">
+        <span class="tg-l">Playback</span>
+        <div class="tg-row">
+          <button class="btn primary" id="btn-play" type="button" data-state="playing"><svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg><span>Pause</span></button>
+          <button class="btn" id="btn-step" type="button" title="Advance 10 simulated ms"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l10 7-10 7zM19 5v14"/></svg>Step</button>
+          <button class="btn" id="btn-reset" type="button" title="Restart this scenario"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg>Reset</button>
+          <button class="btn" id="btn-full" type="button" title="Full screen (F)"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-enter" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path class="i-exit" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg><span>Full screen</span></button>
+        </div>
+      </div>
+      <fieldset class="seg tgroup" id="speed" style="display:flex">
+        <legend>Speed</legend>
+        <label><input type="radio" name="speed" value="0.5">0.5×</label>
+        <label><input type="radio" name="speed" value="1" checked>1×</label>
+        <label><input type="radio" name="speed" value="2">2×</label>
+        <label><input type="radio" name="speed" value="4">4×</label>
+        <label><input type="radio" name="speed" value="8">8×</label>
+      </fieldset>
+      <div class="tgroup">
+        <span class="tg-l">Client workload</span>
+        <fieldset class="seg" id="workload" style="display:flex">
+          <legend>Workload</legend>
+          <label><input type="radio" name="wl" value="off">Off</label>
+          <label><input type="radio" name="wl" value="uniform" checked>Uniform</label>
+          <label><input type="radio" name="wl" value="hot">Hotspot</label>
+        </fieldset>
+      </div>
+      <div class="tgroup">
+        <span class="tg-l">Multi-Raft features</span>
+        <div class="tg-row">
+          <label class="switch" title="Coalesce all Raft messages headed to the same store into one network packet"><input type="checkbox" id="opt-batch" checked>Batching</label>
+          <label class="switch" title="Placement driver: balances leaders and replicas, repairs groups after a store dies"><input type="checkbox" id="opt-pd" checked>Placement driver</label>
+          <label class="switch" title="Split a region in two when it holds too many keys"><input type="checkbox" id="opt-split" checked>Auto-split</label>
+          <label class="switch" title="Ask for pre-votes before bumping the term, so a rejoining store can't disrupt healthy groups"><input type="checkbox" id="opt-prevote" checked>Pre-vote</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="svgbox">
+      <svg id="sim" viewBox="0 0 800 510" role="img" aria-label="Five stores, each holding replicas of several regions. Dots moving between stores are network packets."></svg>
+      <span class="stage-hint">Click a store or a region</span>
+    </div>
+
+    <div class="legend" aria-label="Key">
+      <div class="lg-group">
+        <span class="tg-l">Replicas</span>
+        <span><svg viewBox="-13 -10 26 20"><rect x="-12" y="-8" width="24" height="16" rx="4" class="c0" style="fill:var(--rc)"/></svg>leader</span>
+        <span><svg viewBox="-13 -10 26 20"><rect x="-12" y="-8" width="24" height="16" rx="4" class="c0" style="fill:var(--surface);stroke:var(--rc);stroke-width:1.8"/></svg>follower</span>
+        <span><svg viewBox="-13 -10 26 20"><rect x="-12" y="-8" width="24" height="16" rx="4" style="fill:var(--surface);stroke:var(--amber);stroke-width:2.4;stroke-dasharray:5 3"/></svg>candidate</span>
+        <span><svg viewBox="-13 -10 26 20"><rect x="-12" y="-8" width="24" height="16" rx="4" class="c0" style="fill:var(--surface);stroke:var(--rc);stroke-width:1.8;stroke-dasharray:3 3"/></svg>learner (catching up)</span>
+      </div>
+      <div class="lg-group">
+        <span class="tg-l">Packets</span>
+        <span><svg viewBox="-13 -10 26 20"><circle r="5" style="fill:color-mix(in srgb,var(--accent) 45%,var(--surface));stroke:var(--surface)"/></svg>heartbeats only</span>
+        <span><svg viewBox="-13 -10 26 20"><circle r="7" style="fill:var(--accent)"/><text y="3.5" style="fill:var(--surface);font:600 9.5px var(--font-mono);text-anchor:middle">6</text></svg>log entries (6 messages)</span>
+        <span><svg viewBox="-13 -10 26 20"><circle r="5" style="fill:var(--amber)"/></svg>votes</span>
+        <span><svg viewBox="-13 -10 26 20"><circle r="6" style="fill:var(--ok)"/></svg>snapshot</span>
+      </div>
+    </div>
+
+    <div class="metrics">
+      <div class="tile"><span class="tl">Raft messages / s</span><b id="m-msgs">0</b><small>one per group, per peer</small></div>
+      <div class="tile"><span class="tl">Network packets / s</span><b id="m-pkts">0</b><small id="m-pkts-sub">after batching</small></div>
+      <div class="tile"><span class="tl">Packets saved</span><b id="m-save">0%</b><small id="m-save-sub">by batching per store</small></div>
+      <div class="tile"><span class="tl">Writes committed</span><b id="m-ok">0</b><small id="m-ok-sub">0 / s</small></div>
+      <div class="tile"><span class="tl">Writes failed</span><b id="m-fail">0</b><small>no reachable leader</small></div>
+      <div class="tile"><span class="tl">Leaders per store</span><div class="mini" id="m-lead"></div></div>
+    </div>
+  </section>
+
+  <div class="duo">
+    <section class="panel inspector" id="insp" aria-label="Inspector"></section>
+    <section class="panel narr" aria-label="Event log">
+      <div class="narr-h">
+        <h2>What just happened <span class="narr-count" id="narr-count"></span></h2>
+      </div>
+      <div class="filters" role="group" aria-label="Filter events">
+        <button type="button" data-f="all" aria-pressed="true">All</button>
+        <button type="button" data-f="elect" aria-pressed="false">Elections</button>
+        <button type="button" data-f="place" aria-pressed="false">Placement</button>
+        <button type="button" data-f="split" aria-pressed="false">Splits</button>
+        <button type="button" data-f="warn" aria-pressed="false">Problems</button>
+        <button type="button" data-f="ops" aria-pressed="false">Your actions</button>
+      </div>
+      <ol id="narr"></ol>
+    </section>
+  </div>
+  </div>
+
+  <section class="panel keys" aria-label="Key space">
+    <div class="cl-head">
+      <div class="cl-title">
+        <span class="eyebrow">Sharding</span>
+        <h2>Key space 0–999, cut into regions</h2>
+        <p>Each segment is one region: a key range with its own Raft group. Width is the share of the key space. Clients look up the region for a key and send the write to that region's leader.</p>
+      </div>
+    </div>
+    <div>
+      <div class="keybar" id="keybar"></div>
+      <div class="kaxis" id="kaxis"></div>
+    </div>
+    <div class="tablewrap">
+      <table class="rt">
+        <thead><tr><th>Region</th><th>Keys range</th><th>Keys stored</th><th>Leader</th><th>Term</th><th>Commit</th><th>Replicas</th><th>Status</th></tr></thead>
+        <tbody id="rtable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="notes" aria-label="Notes">
+    <div class="note">
+      <h3>Why many groups</h3>
+      <p>A single Raft group sends every write through one leader and stores every byte on every member. Splitting the data into <strong>regions</strong> lets each store lead some groups and follow others, so write load and storage spread over the whole cluster. A failure only affects the groups that had a replica on the failed store.</p>
+    </div>
+    <div class="note">
+      <h3>What each store must do</h3>
+      <ul>
+        <li><strong>Batch messages.</strong> Hundreds of groups between the same two stores would mean hundreds of tiny packets. Stores coalesce them into one.</li>
+        <li><strong>Route by region.</strong> Every message carries a region id, so the receiving store hands it to the right replica, creating an empty one if a leader asks.</li>
+        <li><strong>Compact logs.</strong> Old entries are dropped once applied. A replica that falls too far behind gets a snapshot instead.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h3>What the placement driver does</h3>
+      <ul>
+        <li><strong>Balances leaders</strong> with leader transfer (TimeoutNow), so no store does all the write work.</li>
+        <li><strong>Repairs</strong> a group that lost a replica: add a learner elsewhere, send it a snapshot, promote it, then remove the dead replica. One membership change at a time.</li>
+        <li><strong>Splits</strong> big regions at the median key. The new region starts its own Raft group on the same stores.</li>
+      </ul>
+    </div>
+    <div class="try">
+      <h3>Try this</h3>
+      <ul>
+        <li>Select the store with the most leaders and crash it. Only the groups it led hold elections, all at once. After 1.5 simulated seconds the placement driver starts rebuilding the missing replicas elsewhere.</li>
+        <li>Turn batching off and watch packets per second jump to match Raft messages per second. Turn it back on and they collapse into a handful of packets per store pair.</li>
+        <li>Turn pre-vote off, isolate a store for a few seconds, then heal it. Its groups come back with inflated terms and force healthy leaders to step down. With pre-vote on, nothing happens.</li>
+      </ul>
+      <p class="muted" style="color:var(--muted);font-size:.86rem">The safety chip checks, per region, that no two leaders share a term and that committed entries never change. Membership changes add or remove one voter at a time, so no joint consensus is needed.</p>
+    </div>
+  </section>
+
+  <footer>Inspired by TiKV's regions and placement driver and CockroachDB's ranges. Each group follows the Raft paper (Ongaro and Ousterhout, 2014) plus pre-vote, check-quorum, leader transfer, learners and snapshots from the Raft thesis.</footer>
+</div>
+
+<script>
+(() => {
+'use strict';
+/*SIM-START*/
+const STORES = [1, 2, 3, 4, 5];
+const KEYS = 1000;
+const CFG = { eMin: 150, eMax: 300, hb: 50, latMin: 14, latMax: 28, batch: 8, flush: 5, pdEvery: 400, downAfter: 1500,
+  splitKeys: 20, maxRegions: 12, keep: 8, maxLag: 40, uniformEvery: 55, hotEvery: 26, snapRetry: 250, taskTimeout: 9000 };
+const HOT = [600, 660];
+
+let S = null;
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const key = (rid, sid) => rid + '@' + sid;
+const sv = s => `<span class="sv">S${s}</span>`;
+const R = rid => `<span class="rg c${S.regions[rid] ? S.regions[rid].color : 0}">R${rid}</span>`;
+
+function newSim(seed, layout) {
+  S = { t: 0, rnd: mulberry32(seed), stores: {}, regions: {}, reps: {}, envs: [], events: [], nextRid: 1, nextColor: 0,
+        lastArrive: {}, workload: 'uniform', batching: true, prevote: true, pd: true, autoSplit: true,
+        nextWrite: 20, cmd: 0, retries: [], tasks: {}, leaders: {}, cm: {}, violation: null, script: [], si: 0, envId: 0,
+        stats: { ok: 0, fail: 0, b: Array.from({ length: 10 }, () => ({ m: 0, p: 0, w: 0 })), bi: 0 }, failNote: {} };
+  for (const s of STORES) S.stores[s] = { id: s, alive: true, isolated: false, downSince: null, out: [], nextFlush: 0 };
+  const w = KEYS / layout.length;
+  layout.forEach((peers, i) => {
+    const rid = S.nextRid++;
+    S.regions[rid] = { id: rid, start: Math.round(i * w), end: i === layout.length - 1 ? KEYS : Math.round((i + 1) * w), color: S.nextColor++ % 12 };
+    for (const s of peers) mkRep(rid, s, peers, [], null);
+  });
+}
+
+function mkRep(rid, sid, voters, learners, init) {
+  const r = { rid, sid, role: 'follower', pre: false, term: init ? init.term : 0, votedFor: null,
+    base: init ? init.base : 0, baseTerm: init ? init.baseTerm : 0, log: [], commit: init ? init.base : 0, applied: init ? init.base : 0,
+    kv: init ? init.kv : new Map(), voters: [...voters], learners: [...learners], leaderId: null, lastHeard: -1e9, eDeadline: 0,
+    votes: new Set(), next: {}, match: {}, hbDue: {}, ack: {}, snapPending: {}, snapAt: {}, transfer: null, cqDue: 0, lastNote: -1e9, born: S.t };
+  resetTimer(r);
+  S.reps[key(rid, sid)] = r;
+  return r;
+}
+function resetTimer(r) { r.eDeadline = S.t + CFG.eMin + Math.floor(S.rnd() * (CFG.eMax - CFG.eMin)); }
+function note(kind, html) { S.events.push({ t: S.t, kind, html }); }
+
+const lastIdx = r => r.base + r.log.length;
+const termAt = (r, i) => i === r.base ? r.baseTerm : (i > r.base && i <= lastIdx(r)) ? r.log[i - r.base - 1].term : -1;
+const lastTerm = r => termAt(r, lastIdx(r));
+const upToDate = (lt, li, r) => lt > lastTerm(r) || (lt === lastTerm(r) && li >= lastIdx(r));
+const isVoter = r => r.voters.includes(r.sid);
+const quorum = r => Math.floor(r.voters.length / 2) + 1;
+const peers = r => [...r.voters, ...r.learners].filter(s => s !== r.sid);
+const alive = s => S.stores[s].alive;
+const reach = s => S.stores[s].alive && !S.stores[s].isolated;
+const canTalk = (a, b) => !S.stores[a].isolated && !S.stores[b].isolated;
+const rids = () => Object.keys(S.regions).map(Number);
+function repsOf(rid) { const out = []; for (const s of STORES) { const r = S.reps[key(rid, s)]; if (r) out.push(r); } return out; }
+function repsOn(sid) { return Object.values(S.reps).filter(r => r.sid === sid).sort((a, b) => a.rid - b.rid); }
+// The leader a client or the placement driver can actually reach: highest term among leaders on reachable stores.
+function leaderOf(rid) { let best = null; for (const r of repsOf(rid)) if (r.role === 'leader' && reach(r.sid) && (!best || r.term > best.term)) best = r; return best; }
+function confOf(rid) {
+  const L = leaderOf(rid); if (L) return L;
+  let best = null; for (const r of repsOf(rid)) if (!best || r.applied > best.applied) best = r; return best;
+}
+function regionFor(k) { for (const rid of rids()) { const g = S.regions[rid]; if (k >= g.start && k < g.end) return rid; } return null; }
+
+/* ---------- network: per-store outboxes, optionally coalesced into one packet per destination ---------- */
+function send(r, to, m) {
+  m.rid = r.rid; m.from = r.sid; m.to = to; if (m.term === undefined) m.term = r.term;
+  S.stores[r.sid].out.push(m); S.stats.b[S.stats.bi].m++;
+}
+function mkEnv(from, to, msgs) {
+  const pair = from + '>' + to;
+  let arrive = S.t + CFG.latMin + S.rnd() * (CFG.latMax - CFG.latMin);
+  arrive = Math.max(arrive, S.lastArrive[pair] || 0);       // FIFO per store pair, like one TCP stream
+  S.lastArrive[pair] = arrive;
+  S.envs.push({ id: ++S.envId, from, to, msgs, sent: S.t, arrive, lost: !canTalk(from, to) });
+  S.stats.b[S.stats.bi].p++;
+}
+function flush() {
+  for (const s of STORES) {
+    const st = S.stores[s];
+    if (!st.alive) { st.out = []; continue; }
+    if (!st.out.length) continue;
+    if (S.batching) {
+      if (S.t < st.nextFlush) continue;
+      const by = {};
+      for (const m of st.out) (by[m.to] ||= []).push(m);
+      for (const to in by) mkEnv(s, +to, by[to]);
+      st.nextFlush = S.t + CFG.flush;
+    } else for (const m of st.out) mkEnv(s, m.to, [m]);
+    st.out = [];
+  }
+}
+
+/* ---------- one Raft group replica ---------- */
+function deliver(m) {
+  let r = S.reps[key(m.rid, m.to)];
+  if (!r) {
+    if ((m.type !== 'AE' && m.type !== 'SNAP') || !S.regions[m.rid]) return;
+    r = mkRep(m.rid, m.to, m.voters, m.learners, null);
+    note('place', `${sv(m.to)} has no replica of ${R(m.rid)} yet, so it creates an empty one when leader ${sv(m.from)} contacts it. A snapshot will fill it.`);
+  }
+  const member = r.voters.includes(m.from) || r.learners.includes(m.from);
+  if (!member && (m.type === 'PRV' || m.type === 'RV')) return;            // votes from non-members are ignored
+  if (m.type === 'RV' && !m.transfer && r.leaderId !== null && S.t - r.lastHeard < CFG.eMin) return;  // leader lease
+  if (m.type === 'PRV') {
+    const fresh = r.leaderId !== null && S.t - r.lastHeard < CFG.eMin;
+    const grant = m.term > r.term && upToDate(m.lastTerm, m.lastIdx, r) && !fresh;
+    send(r, m.from, { type: 'PRVR', term: grant ? m.term : r.term, granted: grant });
+    return;
+  }
+  if (m.term > r.term && !(m.type === 'PRVR' && m.granted)) stepDown(r, m.term, m.from);
+  switch (m.type) {
+    case 'PRVR':
+      if (r.role === 'candidate' && r.pre && m.granted && m.term === r.term + 1 && r.voters.includes(m.from)) {
+        r.votes.add(m.from);
+        if (r.votes.size >= quorum(r)) startElection(r, false);
+      }
+      break;
+    case 'RV': {
+      const grant = m.term >= r.term && isVoter(r) && (r.votedFor === null || r.votedFor === m.from) && upToDate(m.lastTerm, m.lastIdx, r);
+      if (grant) { r.votedFor = m.from; resetTimer(r); }
+      send(r, m.from, { type: 'RVR', granted: grant });
+      break;
+    }
+    case 'RVR':
+      if (r.role === 'candidate' && !r.pre && m.term === r.term && m.granted && r.voters.includes(m.from)) {
+        r.votes.add(m.from);
+        if (r.votes.size >= quorum(r)) becomeLeader(r);
+      }
+      break;
+    case 'AE': handleAE(r, m); break;
+    case 'AER': handleAER(r, m); break;
+    case 'SNAP': handleSnap(r, m); break;
+    case 'TN':
+      if (isVoter(r) && r.role !== 'leader') {
+        note('elect', `${sv(r.sid)} gets TimeoutNow for ${R(r.rid)} from ${sv(m.from)}. It starts an election right away, skipping pre-vote.`);
+        startElection(r, true);
+      }
+      break;
+  }
+}
+
+function follow(r, from) {
+  if (r.role === 'candidate' && !r.pre) note('elect', `${sv(r.sid)} hears from leader ${sv(from)} and stops its campaign in ${R(r.rid)}.`);
+  r.role = 'follower'; r.pre = false; r.leaderId = from; r.lastHeard = S.t; r.transfer = null; resetTimer(r);
+}
+
+function handleAE(r, m) {
+  if (m.term < r.term) { send(r, m.from, { type: 'AER', success: false, hint: lastIdx(r) }); return; }
+  follow(r, m.from);
+  let prevIdx = m.prevIdx, prevTerm = m.prevTerm, ents = m.entries;
+  if (prevIdx < r.base) {                       // entries up to base are committed here, so they match the leader's
+    ents = ents.slice(r.base - prevIdx); prevIdx = r.base; prevTerm = r.baseTerm;
+  }
+  if (termAt(r, prevIdx) !== prevTerm) { send(r, m.from, { type: 'AER', success: false, hint: Math.min(lastIdx(r), prevIdx - 1) }); return; }
+  let idx = prevIdx;
+  for (const e of ents) {
+    idx++;
+    if (idx <= lastIdx(r)) {
+      if (termAt(r, idx) !== e.term) {
+        if (idx <= r.commit) S.violation = `${'R' + r.rid}: committed entry ${idx} overwritten on S${r.sid}`;
+        const gone = lastIdx(r) - idx + 1;
+        r.log.length = idx - r.base - 1; r.log.push(e);
+        note('warn', `${sv(r.sid)} drops ${gone} uncommitted entr${gone === 1 ? 'y' : 'ies'} of ${R(r.rid)} from index ${idx} on that conflict with leader ${sv(m.from)}.`);
+      }
+    } else r.log.push(e);
+  }
+  if (m.leaderCommit > r.commit) r.commit = Math.max(r.commit, Math.min(m.leaderCommit, idx));
+  apply(r);
+  if (S.reps[key(r.rid, r.sid)] === r) send(r, m.from, { type: 'AER', success: true, matchIdx: Math.max(idx, Math.min(r.base, m.prevIdx + m.entries.length)) });
+}
+
+function handleAER(L, m) {
+  if (L.role !== 'leader' || m.term !== L.term || L.next[m.from] === undefined) return;
+  L.ack[m.from] = S.t;
+  if (m.success) {
+    if (m.matchIdx > (L.match[m.from] || 0)) L.match[m.from] = m.matchIdx;
+    if (L.next[m.from] < L.match[m.from] + 1) L.next[m.from] = L.match[m.from] + 1;
+    if (L.snapPending[m.from] && L.match[m.from] >= L.snapPending[m.from]) delete L.snapPending[m.from];
+    advanceCommit(L);
+  } else {
+    L.next[m.from] = Math.max((L.match[m.from] || 0) + 1, Math.min(L.next[m.from] - 1, m.hint + 1));
+    sendAE(L, m.from);
+  }
+}
+
+function handleSnap(r, m) {
+  if (m.term < r.term) { send(r, m.from, { type: 'AER', success: false, hint: lastIdx(r) }); return; }
+  follow(r, m.from);
+  if (m.index > r.commit) {
+    r.base = m.index; r.baseTerm = m.snapTerm; r.log = []; r.commit = r.applied = m.index;
+    r.kv = new Map(m.kv); r.voters = [...m.voters]; r.learners = [...m.learners];
+    note('place', `${sv(r.sid)} installs a snapshot of ${R(r.rid)}: ${r.kv.size} keys, state up to index ${m.index}.`);
+  }
+  send(r, m.from, { type: 'AER', success: true, matchIdx: m.index });
+}
+
+function sendAE(L, p) {
+  // With batching, every group on a store heartbeats on the same store-wide tick, so heartbeats share packets.
+  L.hbDue[p] = S.batching ? (Math.floor(S.t / CFG.hb) + 1) * CFG.hb : S.t + CFG.hb;
+  if (L.snapPending[p]) { if (S.t < L.snapAt[p] + CFG.snapRetry) return; delete L.snapPending[p]; }
+  const next = L.next[p];
+  if (next <= L.base) {
+    const idx = L.applied;
+    send(L, p, { type: 'SNAP', index: idx, snapTerm: termAt(L, idx), kv: [...L.kv], voters: [...L.voters], learners: [...L.learners] });
+    L.snapPending[p] = idx; L.snapAt[p] = S.t; L.next[p] = idx + 1;
+    note('place', `Leader ${sv(L.sid)} sends ${sv(p)} a snapshot of ${R(L.rid)} (${L.kv.size} keys, up to index ${idx}). The log entries ${sv(p)} needs were already compacted.`);
+    return;
+  }
+  const prevIdx = next - 1;
+  const entries = L.log.slice(prevIdx - L.base, prevIdx - L.base + CFG.batch);
+  send(L, p, { type: 'AE', prevIdx, prevTerm: termAt(L, prevIdx), entries, leaderCommit: L.commit, voters: L.voters, learners: L.learners });
+  L.next[p] = prevIdx + entries.length + 1;     // pipelined: assume it arrives, back up on rejection
+}
+function poke(L) { for (const p of peers(L)) if (L.hbDue[p] !== undefined) L.hbDue[p] = Math.min(L.hbDue[p], S.t + 1); }
+
+function campaign(r) {
+  resetTimer(r);
+  const loud = S.t - r.lastNote > 900; if (loud) r.lastNote = S.t;
+  if (!S.prevote) return startElection(r, false, loud);
+  r.role = 'candidate'; r.pre = true; r.votes = new Set([r.sid]); r.leaderId = null;
+  if (loud) note('elect', `${R(r.rid)} on ${sv(r.sid)}: the election timer fires. It asks for pre-votes for term ${r.term + 1} without raising its own term.`);
+  if (r.votes.size >= quorum(r)) return startElection(r, false);
+  for (const s of r.voters) if (s !== r.sid) send(r, s, { type: 'PRV', term: r.term + 1, lastIdx: lastIdx(r), lastTerm: lastTerm(r) });
+}
+function startElection(r, transfer, loud = true) {
+  r.term++; r.role = 'candidate'; r.pre = false; r.votedFor = r.sid; r.votes = new Set([r.sid]); r.leaderId = null; resetTimer(r);
+  if (loud) note('elect', transfer ? `${sv(r.sid)} campaigns for ${R(r.rid)} in term ${r.term}.`
+    : S.prevote ? `${sv(r.sid)} won pre-votes for ${R(r.rid)} and starts a real election for term ${r.term}.`
+    : `${R(r.rid)} on ${sv(r.sid)}: the election timer fires. It raises its term to ${r.term} and asks for votes.`);
+  if (r.votes.size >= quorum(r)) return becomeLeader(r);
+  for (const s of r.voters) if (s !== r.sid) send(r, s, { type: 'RV', lastIdx: lastIdx(r), lastTerm: lastTerm(r), transfer });
+}
+function becomeLeader(r) {
+  r.role = 'leader'; r.pre = false; r.leaderId = r.sid; r.lastHeard = S.t; r.transfer = null;
+  r.next = {}; r.match = {}; r.hbDue = {}; r.ack = {}; r.snapPending = {}; r.snapAt = {};
+  for (const p of peers(r)) { r.next[p] = lastIdx(r) + 1; r.match[p] = 0; r.hbDue[p] = S.t; r.ack[p] = S.t; }
+  r.cqDue = S.t + CFG.eMax;
+  const lm = S.leaders[r.rid] ||= {};
+  if (lm[r.term] !== undefined && lm[r.term] !== r.sid) S.violation = `R${r.rid}: two leaders in term ${r.term}`;
+  lm[r.term] = r.sid;
+  r.log.push({ term: r.term, cmd: { op: 'noop' } });      // commits entries from older terms
+  note('lead', `${sv(r.sid)} becomes leader of ${R(r.rid)} for term ${r.term}, with ${r.votes.size} of ${r.voters.length} votes.`);
+  if (quorum(r) === 1) advanceCommit(r);
+}
+function stepDown(r, term, from) {
+  const was = r.role;
+  r.term = term; r.votedFor = null; r.leaderId = null;
+  if (was !== 'follower') {
+    r.role = 'follower'; r.pre = false; r.transfer = null;
+    if (was === 'leader') { resetTimer(r); note('elect', `${sv(r.sid)} sees term ${term} from ${sv(from)} and stops leading ${R(r.rid)}.`); }
+  }
+}
+function checkQuorum(L) {
+  L.cqDue = S.t + CFG.eMax;
+  let c = 0; for (const s of L.voters) if (s === L.sid || S.t - (L.ack[s] ?? -1e9) <= CFG.eMax) c++;
+  if (c < quorum(L)) {
+    L.role = 'follower'; L.leaderId = null; L.transfer = null; resetTimer(L);
+    note('warn', `${sv(L.sid)} has not heard from a majority of ${R(L.rid)} for ${CFG.eMax} ms. It steps down instead of acting as a leader nobody follows (check quorum).`);
+  }
+}
+
+function advanceCommit(L) {
+  for (let N = lastIdx(L); N > L.commit; N--) {
+    if (termAt(L, N) !== L.term) break;               // only current-term entries are counted directly
+    let c = 0; for (const s of L.voters) if (s === L.sid || (L.match[s] || 0) >= N) c++;
+    if (c < quorum(L)) continue;
+    const cm = S.cm[L.rid] ||= {};
+    for (let i = L.commit + 1; i <= N; i++) {
+      const t = termAt(L, i);
+      if (cm[i] !== undefined && cm[i] !== t) S.violation = `R${L.rid}: committed entry ${i} changed`;
+      cm[i] = t;
+    }
+    L.commit = N; apply(L); poke(L);
+    return;
+  }
+}
+
+function apply(r) {
+  while (r.applied < r.commit) {
+    const i = ++r.applied, c = r.log[i - r.base - 1].cmd;
+    if (c.op === 'put') { r.kv.set(c.k, c.v); if (r.role === 'leader') { S.stats.ok++; S.stats.b[S.stats.bi].w++; } }
+    else if (c.op === 'conf') applyConf(r, c);
+    else if (c.op === 'split') applySplit(r, c);
+    if (S.reps[key(r.rid, r.sid)] !== r) return;      // it applied its own removal
+  }
+  compact(r);
+}
+function compact(r) {
+  let target = r.applied - CFG.keep;
+  if (r.role === 'leader') {
+    let lo = r.applied; for (const p of peers(r)) lo = Math.min(lo, r.match[p] || 0);
+    target = Math.max(r.applied - CFG.maxLag, Math.min(target, lo));   // keep entries for slow peers, up to a limit
+  }
+  if (target - r.base >= 16) { r.baseTerm = termAt(r, target); r.log = r.log.slice(target - r.base); r.base = target; }
+}
+function applyConf(r, c) {
+  if (c.type === 'addLearner') { if (!r.voters.includes(c.sid) && !r.learners.includes(c.sid)) r.learners = [...r.learners, c.sid]; }
+  else if (c.type === 'promote') { r.learners = r.learners.filter(s => s !== c.sid); if (!r.voters.includes(c.sid)) r.voters = [...r.voters, c.sid]; }
+  else if (c.type === 'remove') { r.voters = r.voters.filter(s => s !== c.sid); r.learners = r.learners.filter(s => s !== c.sid); }
+  if (r.role === 'leader') {
+    if (c.type === 'addLearner' && r.next[c.sid] === undefined) { r.next[c.sid] = 1; r.match[c.sid] = 0; r.hbDue[c.sid] = S.t; r.ack[c.sid] = S.t; }
+    if (c.type === 'remove') { delete r.next[c.sid]; delete r.match[c.sid]; delete r.hbDue[c.sid]; delete r.ack[c.sid]; }
+    const what = { addLearner: `adds ${sv(c.sid)} as a learner. It receives the log but does not vote yet.`,
+                   promote: `promotes ${sv(c.sid)} to voter. The group now has ${r.voters.length} voters and needs ${quorum(r)} for a majority.`,
+                   remove: `removes ${sv(c.sid)}. Voters are now ${r.voters.map(sv).join(' ')}.` }[c.type];
+    note('conf', `${R(r.rid)} commits a membership change and ${what}`);
+  }
+  if (c.type === 'remove' && c.sid === r.sid) destroy(r, 'it applied its own removal');
+}
+function applySplit(r, c) {
+  const moved = new Map();
+  for (const [k, v] of r.kv) if (k >= c.sk) { moved.set(k, v); r.kv.delete(k); }
+  const ex = S.reps[key(c.newRid, r.sid)];
+  if (!ex || (ex.base === 0 && ex.log.length === 0)) {         // replace an empty placeholder, keep an initialized replica
+    const nr = mkRep(c.newRid, r.sid, r.voters, r.learners, { term: Math.max(1, ex ? ex.term : 0), base: 1, baseTerm: 1, kv: moved });
+    if (ex) nr.votedFor = ex.votedFor;
+    if (r.role === 'leader') nr.eDeadline = S.t + CFG.latMax + 10;   // the old leader's store campaigns first
+  }
+  if (!S.regions[c.newRid]) {
+    const g = S.regions[r.rid];
+    S.regions[c.newRid] = { id: c.newRid, start: c.sk, end: c.end, color: S.nextColor++ % 12 };
+    g.end = c.sk;
+    note('split', `${R(r.rid)} splits at key ${c.sk}. Keys ${c.sk}–${c.end - 1} move to the new region ${R(c.newRid)}, a separate Raft group on the same stores (${r.voters.map(sv).join(' ')}).`);
+  }
+}
+function destroy(r, why) {
+  delete S.reps[key(r.rid, r.sid)];
+  note('place', `${sv(r.sid)} deletes its replica of ${R(r.rid)}: ${why}.`);
+}
+function propose(L, cmd) { L.log.push({ term: L.term, cmd }); poke(L); if (quorum(L) === 1) advanceCommit(L); }
+function pendingAdmin(L) {
+  for (let i = L.commit + 1; i <= lastIdx(L); i++) { const op = L.log[i - L.base - 1].cmd.op; if (op === 'conf' || op === 'split') return true; }
+  return false;
+}
+
+/* ---------- clients ---------- */
+function write(k, tries = 0) {
+  const rid = regionFor(k), L = leaderOf(rid);
+  if (!L || L.transfer) {
+    if (tries < 3) { S.retries.push({ k, tries: tries + 1, at: S.t + 60 }); return; }
+    S.stats.fail++;
+    if (S.t - (S.failNote[rid] || -1e9) > 1000) {
+      S.failNote[rid] = S.t;
+      note('warn', `A write to key ${k} fails after retries: ${R(rid)} has no leader a client can reach.`);
+    }
+    return;
+  }
+  L.log.push({ term: L.term, cmd: { op: 'put', k, v: ++S.cmd } });
+  poke(L);
+  if (quorum(L) === 1) advanceCommit(L);
+}
+
+/* ---------- placement driver ---------- */
+function proposeSplit(L, auto) {
+  const ks = [...L.kv.keys()].sort((a, b) => a - b);
+  const g = S.regions[L.rid];
+  if (ks.length < 2 || pendingAdmin(L)) return false;
+  const sk = ks[Math.floor(ks.length / 2)];
+  if (sk <= g.start) return false;
+  const newRid = S.nextRid++;
+  propose(L, { op: 'split', sk, end: g.end, newRid });
+  note('split', auto ? `${R(L.rid)} holds ${L.kv.size} keys, over the split limit of ${CFG.splitKeys}. Leader ${sv(L.sid)} proposes a split at the median key, ${sk}.`
+                     : `Leader ${sv(L.sid)} proposes splitting ${R(L.rid)} at its median key, ${sk}. The split is a log entry, so every replica splits at the same point in its history.`);
+  return true;
+}
+function requestTransfer(L, to) {
+  L.transfer = { to, until: S.t + CFG.eMax, sent: false };
+  poke(L);
+}
+function replicaCount(s) { let c = 0; for (const k in S.reps) if (S.reps[k].sid === s) c++; return c; }
+function leaderCounts() {
+  const c = {}; for (const s of STORES) c[s] = 0;
+  for (const rid of rids()) { const L = leaderOf(rid); if (L) c[L.sid]++; }
+  return c;
+}
+function pickTarget(L) {
+  const cand = STORES.filter(s => reach(s) && !L.voters.includes(s) && !L.learners.includes(s));
+  cand.sort((a, b) => replicaCount(a) - replicaCount(b) || a - b);
+  return cand[0];
+}
+function progressTask(rid, T) {
+  const L = leaderOf(rid);
+  if (S.t - T.at > CFG.taskTimeout || !reach(T.to)) {
+    delete S.tasks[rid];
+    note('warn', `The placement driver gives up moving ${R(rid)} from ${sv(T.from)} to ${sv(T.to)} and will try again later.`);
+    return;
+  }
+  if (!L) return;
+  if (T.stage === 'add') {
+    if (L.learners.includes(T.to) || L.voters.includes(T.to)) T.stage = 'catch';
+    else if (!pendingAdmin(L) && S.t - T.prop > 600) { propose(L, { op: 'conf', type: 'addLearner', sid: T.to }); T.prop = S.t; }
+  }
+  if (T.stage === 'catch') {
+    if (L.voters.includes(T.to)) T.stage = 'remove';
+    else if ((L.match[T.to] || 0) >= L.commit && L.commit > 0 && !pendingAdmin(L) && S.t - T.prop > 300) {
+      propose(L, { op: 'conf', type: 'promote', sid: T.to }); T.prop = S.t;
+    }
+  }
+  if (T.stage === 'remove') {
+    if (!L.voters.includes(T.from) && !L.learners.includes(T.from)) {
+      delete S.tasks[rid];
+      note('place', `${R(rid)} is back to ${L.voters.length} healthy replicas: ${L.voters.map(sv).join(' ')}.`);
+    } else if (L.sid === T.from) {
+      if (!L.transfer && S.t - T.prop > 400) {
+        const to = L.voters.find(s => s !== L.sid && reach(s) && (L.match[s] || 0) >= L.commit);
+        if (to) { requestTransfer(L, to); T.prop = S.t; note('place', `${sv(L.sid)} leads ${R(rid)} but is the replica being moved away, so it hands leadership to ${sv(to)} first.`); }
+      }
+    } else if (!pendingAdmin(L) && S.t - T.prop > 600) { propose(L, { op: 'conf', type: 'remove', sid: T.from }); T.prop = S.t; }
+  }
+}
+function pdTick() {
+  // Stale replicas: the leader's committed config no longer includes them (removed while their store was away).
+  for (const rid of rids()) {
+    const L = leaderOf(rid);
+    if (!L || termAt(L, L.commit) !== L.term) continue;
+    for (const r of repsOf(rid)) if (r !== L && reach(r.sid) && !L.voters.includes(r.sid) && !L.learners.includes(r.sid))
+      destroy(r, `the placement driver reports it was removed from the group while ${sv(r.sid)} was away`);
+  }
+  if (!S.pd) return;
+  for (const rid in S.tasks) progressTask(+rid, S.tasks[rid]);
+  const down = STORES.filter(s => !reach(s) && S.stores[s].downSince !== null && S.t - S.stores[s].downSince >= CFG.downAfter);
+  // Repair: give groups that lost a replica a new one elsewhere.
+  for (const rid of rids()) {
+    if (Object.keys(S.tasks).length >= 2) break;
+    if (S.tasks[rid]) continue;
+    const L = leaderOf(rid); if (!L) continue;
+    const dead = L.voters.find(s => down.includes(s)); if (dead === undefined) continue;
+    const to = pickTarget(L); if (to === undefined) continue;
+    S.tasks[rid] = { rid, from: dead, to, stage: 'add', why: 'repair', at: S.t, prop: -1e9 };
+    note('place', `${sv(dead)} has been unreachable for ${CFG.downAfter} ms. The placement driver rebuilds ${R(rid)}'s missing replica on ${sv(to)}.`);
+  }
+  if (Object.keys(S.tasks).length) return;
+  // Replica balance: move a replica from the fullest store to the emptiest.
+  const up = STORES.filter(reach);
+  if (!down.length && up.length >= 3) {
+    const byCount = [...up].sort((a, b) => replicaCount(a) - replicaCount(b) || a - b);
+    const lo = byCount[0], hi = byCount[byCount.length - 1];
+    if (replicaCount(hi) - replicaCount(lo) >= 2) {
+      const order = rids().map(rid => leaderOf(rid)).filter(Boolean).sort((a, b) => (a.sid === hi) - (b.sid === hi));
+      for (const L of order) {
+        if (L.voters.includes(hi) && !L.voters.includes(lo) && !L.learners.includes(lo)) {
+          S.tasks[L.rid] = { rid: L.rid, from: hi, to: lo, stage: 'add', why: 'balance', at: S.t, prop: -1e9 };
+          note('place', `${sv(hi)} holds ${replicaCount(hi)} replicas and ${sv(lo)} holds ${replicaCount(lo)}. The placement driver moves ${R(L.rid)}'s replica from ${sv(hi)} to ${sv(lo)}.`);
+          return;
+        }
+      }
+    }
+  }
+  // Leader balance: transfer one leadership from the busiest store to the least busy one.
+  const lc = leaderCounts();
+  const byLead = [...up].sort((a, b) => lc[a] - lc[b] || a - b);
+  if (byLead.length >= 2) {
+    const lo = byLead[0], hi = byLead[byLead.length - 1];
+    if (lc[hi] - lc[lo] >= 2) {
+      for (const rid of rids()) {
+        const L = leaderOf(rid);
+        if (L && L.sid === hi && !L.transfer && L.voters.includes(lo) && (L.match[lo] || 0) >= L.commit) {
+          requestTransfer(L, lo);
+          note('place', `${sv(hi)} leads ${lc[hi]} regions and ${sv(lo)} leads ${lc[lo]}. The placement driver asks ${sv(hi)} to hand ${R(rid)} to ${sv(lo)}.`);
+          break;
+        }
+      }
+    }
+  }
+  // Split check.
+  if (S.autoSplit && rids().length < CFG.maxRegions) {
+    for (const rid of rids()) { const L = leaderOf(rid); if (L && L.kv.size >= CFG.splitKeys && proposeSplit(L, true)) break; }
+  }
+}
+
+/* ---------- operator actions ---------- */
+function crash(s) {
+  const st = S.stores[s]; if (!st.alive) return;
+  st.alive = false; st.out = []; if (st.downSince === null) st.downSince = S.t;
+  const led = repsOn(s).filter(r => r.role === 'leader').length;
+  for (const r of repsOn(s)) { r.role = 'follower'; r.pre = false; r.leaderId = null; r.transfer = null; }
+  note('ops', `${sv(s)} crashes. Its ${repsOn(s).length} replicas stop, and the ${led} group${led === 1 ? '' : 's'} it led must elect new leaders. Groups that only had a follower here keep going.`);
+}
+function restart(s) {
+  const st = S.stores[s]; if (st.alive) return;
+  st.alive = true; if (!st.isolated) st.downSince = null;
+  for (const r of repsOn(s)) { resetTimer(r); r.lastHeard = -1e9; }
+  note('ops', `${sv(s)} restarts. Its replicas reload term, vote and log from disk and wait to hear from their leaders.`);
+}
+function isolate(s) {
+  const st = S.stores[s]; if (st.isolated) return;
+  st.isolated = true; if (st.downSince === null) st.downSince = S.t;
+  note('ops', `${sv(s)} is cut off from the network. It stays up, but no packet gets in or out.`);
+}
+function heal(s) {
+  const st = S.stores[s]; if (!st.isolated) return;
+  st.isolated = false; if (st.alive) st.downSince = null;
+  note('ops', `${sv(s)} is back on the network.`);
+}
+function busiest() { const lc = leaderCounts(); return STORES.filter(reach).sort((a, b) => lc[b] - lc[a] || a - b)[0]; }
+
+/* ---------- main loop ---------- */
+function step() {
+  S.t++;
+  const bi = Math.floor(S.t / 100) % 10;
+  if (bi !== S.stats.bi) { S.stats.bi = bi; S.stats.b[bi] = { m: 0, p: 0, w: 0 }; }
+  const keep = [];
+  for (const e of S.envs) {
+    if (e.lost) { if (S.t < e.sent + (e.arrive - e.sent) * 0.55) keep.push(e); continue; }
+    if (e.arrive > S.t) { keep.push(e); continue; }
+    if (!alive(e.to) || !canTalk(e.from, e.to)) continue;
+    for (const m of e.msgs) deliver(m);
+  }
+  S.envs = keep;
+  for (const k in S.reps) {
+    const r = S.reps[k];
+    if (!r || !alive(r.sid)) continue;
+    if (r.role === 'leader') {
+      r.lastHeard = S.t;
+      if (r.transfer) {
+        const T = r.transfer;
+        if (S.t > T.until) r.transfer = null;
+        else if (!T.sent && (r.match[T.to] || 0) >= lastIdx(r)) { send(r, T.to, { type: 'TN' }); T.sent = true; }
+      }
+      for (const p of peers(r)) if (r.hbDue[p] !== undefined && S.t >= r.hbDue[p]) sendAE(r, p);
+      if (S.t >= r.cqDue) checkQuorum(r);
+    } else if (S.t >= r.eDeadline) {
+      if (isVoter(r)) campaign(r); else resetTimer(r);
+    }
+  }
+  flush();
+  if (S.workload !== 'off' && S.t >= S.nextWrite) {
+    const hot = S.workload === 'hot';
+    S.nextWrite = S.t + (hot ? CFG.hotEvery : CFG.uniformEvery) * (0.5 + S.rnd());
+    const k = hot && S.rnd() < 0.8 ? HOT[0] + Math.floor(S.rnd() * (HOT[1] - HOT[0])) : Math.floor(S.rnd() * KEYS);
+    write(k);
+  }
+  if (S.retries.length) {
+    const due = S.retries.filter(x => x.at <= S.t);
+    if (due.length) { S.retries = S.retries.filter(x => x.at > S.t); for (const x of due) write(x.k, x.tries); }
+  }
+  if (S.t % CFG.pdEvery === 0) pdTick();
+  while (S.si < S.script.length && S.script[S.si][0] <= S.t) S.script[S.si++][1]();
+}
+function rates() {
+  let m = 0, p = 0, w = 0; for (const b of S.stats.b) { m += b.m; p += b.p; w += b.w; }
+  return { m, p, w };
+}
+/*SIM-END*/
+
+/* ---------- scenarios ---------- */
+const RING = [[1, 2, 3], [2, 3, 4], [3, 4, 5], [4, 5, 1], [5, 1, 2]];
+const SCN = {
+  steady: { label: 'Steady state', short: 'Five regions on five stores',
+    desc: 'Five regions, three replicas each, spread evenly over five stores. Each group elects its own leader. Writes are spread over the whole key space, so regions grow and split.',
+    layout: RING, setup() {} },
+  crash: { label: 'Store crash', short: 'Many elections at once, then repair',
+    desc: 'At 1.5 s the store leading the most regions crashes. Only the groups it led need new leaders, and they elect them in parallel. After 1.5 s more, the placement driver rebuilds the lost replicas elsewhere.',
+    layout: RING, setup() { S.autoSplit = false; S.script = [[1500, () => crash(busiest())]]; } },
+  hotspot: { label: 'Hot keys', short: 'Split the region under load',
+    desc: '80% of writes hit keys 600–659. The region holding them fills up and splits at its median key, again and again, until the hot range is spread over several groups with leaders on different stores.',
+    layout: RING, setup() { S.workload = 'hot'; } },
+  isolate: { label: 'Network cut', short: 'Pre-vote and check-quorum',
+    desc: 'At 1.5 s one store is cut off; at 5 s it returns. Its leaders step down (check-quorum) and the majority side elects new ones. Turn pre-vote off and reset to see the returning store force needless elections.',
+    layout: RING, setup() { S.autoSplit = false; S.pd = false; S.script = [[1500, () => { S.ctx = busiest(); isolate(S.ctx); }], [5000, () => heal(S.ctx)]]; } },
+  rebalance: { label: 'Rebalance', short: 'Move replicas onto new stores',
+    desc: 'All four regions start on stores 1–3, and stores 4 and 5 are empty, as if they just joined. The placement driver moves replicas over one membership change at a time, then balances leaders.',
+    layout: [[1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2, 3]], setup() { S.autoSplit = false; } },
+};
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SIM_PER_MS = 0.1;
+let playing = !reduce, speed = 1, acc = 0, last = performance.now(), scnKey = 'steady', seed = 7;
+let sel = { kind: 'region', id: 1 }, shown = 0, filter = 'all', uiTick = 0;
+const $ = id => document.getElementById(id);
+
+function loadScenario(k, newSeed) {
+  scnKey = k; if (newSeed) seed = 1 + Math.floor(Math.random() * 1e6);
+  const sc = SCN[k];
+  newSim(seed, sc.layout);
+  sc.setup();
+  if (!S.prevoteForced) S.prevote = $('opt-prevote').checked;
+  syncOpts();
+  sel = { kind: 'region', id: 1 }; shown = 0;
+  $('narr').innerHTML = '';
+  for (const id in chipEls) { chipEls[id].remove(); delete chipEls[id]; }
+  for (const id in envEls) { envEls[id].remove(); delete envEls[id]; }
+  $('scn-name').textContent = sc.label; $('scn-desc').textContent = sc.desc;
+  document.querySelectorAll('.scn').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === k));
+  note('ops', `Scenario: ${sc.label}. ${rids().length} regions on ${STORES.length} stores.`);
+  renderAll(true);
+}
+function syncOpts() {
+  $('opt-batch').checked = S.batching; $('opt-pd').checked = S.pd; $('opt-split').checked = S.autoSplit; $('opt-prevote').checked = S.prevote;
+  document.querySelector(`input[name="wl"][value="${S.workload}"]`).checked = true;
+}
+
+/* ---------- SVG ---------- */
+const svgNS = 'http://www.w3.org/2000/svg';
+const BOX = { w: 224, h: 156 }, CHIP = { w: 36, h: 24, gx: 5, gy: 5 };
+const POS = { 1: [140, 103], 2: [400, 103], 3: [660, 103], 4: [270, 398], 5: [530, 398] };
+const HUB = [400, 252];
+function mk(tag, attrs, parent) { const e = document.createElementNS(svgNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function ctrl(a, b) { const mx = (POS[a][0] + POS[b][0]) / 2, my = (POS[a][1] + POS[b][1]) / 2; return [HUB[0] - 0.35 * (mx - HUB[0]), HUB[1] - 0.35 * (my - HUB[1])]; }
+function qpt(a, b, p) {
+  const [x0, y0] = POS[a], [x1, y1] = POS[b], [cx, cy] = ctrl(Math.min(a, b), Math.max(a, b)), q = 1 - p;
+  return [q * q * x0 + 2 * q * p * cx + p * p * x1, q * q * y0 + 2 * q * p * cy + p * p * y1];
+}
+let gLinks, gEnvs, gStores, storeEls = {}, linkEls = {}, chipEls = {}, envEls = {};
+function buildSVG() {
+  const svg = $('sim');
+  gLinks = mk('g', {}, svg); gEnvs = mk('g', {}, svg); gStores = mk('g', {}, svg);
+  for (let a = 1; a <= 5; a++) for (let b = a + 1; b <= 5; b++) {
+    const [cx, cy] = ctrl(a, b);
+    linkEls[a + '-' + b] = mk('path', { d: `M${POS[a][0]},${POS[a][1]} Q${cx},${cy} ${POS[b][0]},${POS[b][1]}`, class: 'link' }, gLinks);
+  }
+  for (const s of STORES) {
+    const [x, y] = POS[s], g = mk('g', { class: 'store', 'data-store': s }, gStores);
+    mk('rect', { x: x - BOX.w / 2, y: y - BOX.h / 2, width: BOX.w, height: BOX.h, rx: 12, class: 'sbody' }, g);
+    const n = mk('text', { x: x - BOX.w / 2 + 12, y: y - BOX.h / 2 + 23, class: 'sname' }, g); n.textContent = 'S' + s;
+    const info = mk('text', { x: x + BOX.w / 2 - 12, y: y - BOX.h / 2 + 22, class: 'sinfo' }, g);
+    mk('rect', { x: x - BOX.w / 2 + 12, y: y - BOX.h / 2 + 31, width: BOX.w - 24, height: 1, class: 'sbar' }, g);
+    const chips = mk('g', { class: 'chips' }, g);
+    storeEls[s] = { g, info, chips };
+  }
+  svg.addEventListener('click', ev => {
+    const c = ev.target.closest('.rchip');
+    if (c) { sel = { kind: 'region', id: +c.dataset.rid }; renderAll(true); return; }
+    const st = ev.target.closest('.store');
+    if (st) { sel = { kind: 'store', id: +st.dataset.store }; renderAll(true); }
+  });
+}
+function chipPos(s, i) {
+  const [x, y] = POS[s], col = i % 5, row = Math.floor(i / 5);
+  return [x - BOX.w / 2 + 12 + col * (CHIP.w + CHIP.gx), y - BOX.h / 2 + 40 + row * (CHIP.h + CHIP.gy)];
+}
+function regionMaxTerm(rid) { let t = 0; for (const r of repsOf(rid)) t = Math.max(t, r.term); return t; }
+function renderSVG() {
+  const lc = leaderCounts(), seen = new Set();
+  for (const s of STORES) {
+    const st = S.stores[s], E = storeEls[s];
+    E.g.classList.toggle('down', !st.alive);
+    E.g.classList.toggle('isolated', st.alive && st.isolated);
+    E.g.classList.toggle('selected', sel.kind === 'store' && sel.id === s);
+    const reps = repsOn(s);
+    const info = !st.alive ? 'DOWN' : st.isolated ? 'ISOLATED' : `${lc[s]} led · ${reps.length} replicas`;
+    if (E.info.textContent !== info) E.info.textContent = info;
+    reps.slice(0, 20).forEach((r, i) => {
+      const id = key(r.rid, r.sid); seen.add(id);
+      let el = chipEls[id];
+      if (!el) {
+        el = mk('g', { class: 'rchip fresh', 'data-rid': r.rid }, E.chips);
+        mk('rect', { x: 0, y: 0, width: CHIP.w, height: CHIP.h, rx: 5 }, el);
+        mk('rect', { x: -3, y: -3, width: CHIP.w + 6, height: CHIP.h + 6, rx: 7, class: 'ring' }, el);
+        mk('text', { x: CHIP.w / 2, y: 16 }, el);
+        mk('title', {}, el);
+        chipEls[id] = el;
+        const [px, py] = chipPos(s, i); el.style.transform = `translate(${px}px,${py}px)`;
+        setTimeout(() => el.classList.remove('fresh'), 600);
+      }
+      const [px, py] = chipPos(s, i);
+      const tf = `translate(${px}px,${py}px)`; if (el.style.transform !== tf) el.style.transform = tf;
+      const role = !isVoter(r) ? 'learner' : r.role;
+      const stale = r.role === 'leader' && (!reach(r.sid) || r.term < regionMaxTerm(r.rid));
+      const cls = `rchip c${S.regions[r.rid] ? S.regions[r.rid].color : 0} ${role}${stale ? ' stale' : ''}`
+        + (sel.kind === 'region' && sel.id === r.rid ? ' sel' : '') + (sel.kind === 'region' && sel.id !== r.rid ? ' dim' : '')
+        + (el.classList.contains('fresh') ? ' fresh' : '');
+      if (el.getAttribute('class') !== cls) el.setAttribute('class', cls);
+      const t = el.childNodes[2]; const lbl = 'R' + r.rid; if (t.textContent !== lbl) t.textContent = lbl;
+      const tip = `R${r.rid} on S${r.sid}: ${r.pre ? 'pre-candidate' : role}, term ${r.term}, commit ${r.commit}, ${r.kv.size} keys`;
+      if (el.lastChild.textContent !== tip) el.lastChild.textContent = tip;
+    });
+  }
+  for (const id in chipEls) if (!seen.has(id)) { chipEls[id].remove(); delete chipEls[id]; }
+  for (let a = 1; a <= 5; a++) for (let b = a + 1; b <= 5; b++) linkEls[a + '-' + b].classList.toggle('cut', !canTalk(a, b) || !alive(a) || !alive(b));
+  const live = new Set();
+  for (const e of S.envs) {
+    live.add(e.id);
+    let el = envEls[e.id];
+    if (!el) { el = mk('g', { class: 'env' }, gEnvs); mk('circle', { r: 5 }, el); mk('text', { y: 3.5 }, el); envEls[e.id] = el; }
+    const p = Math.max(0, Math.min(1, (S.t - e.sent) / (e.arrive - e.sent)));
+    const [x, y] = qpt(e.from, e.to, p);
+    el.setAttribute('transform', `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+    const n = e.msgs.length;
+    const kind = e.msgs.some(m => m.type === 'SNAP') ? 'e-snap' : e.msgs.some(m => m.type === 'AE' && m.entries.length) ? '' :
+      e.msgs.every(m => m.type === 'AE' || m.type === 'AER') ? 'e-hb' : e.msgs.some(m => /V/.test(m.type)) ? 'e-vote' : 'e-hb';
+    const hit = sel.kind === 'region' && e.msgs.some(m => m.rid === sel.id);
+    el.setAttribute('class', `env ${kind}${hit ? ' e-sel' : ''}`);
+    el.style.opacity = e.lost ? String(Math.max(0, 1 - p / 0.55)) : '1';
+    el.firstChild.setAttribute('r', n > 1 ? 6 + Math.min(4, Math.sqrt(n)) : kind === 'e-snap' ? 6 : 4.5);
+    const tx = n > 1 ? String(n) : ''; if (el.lastChild.textContent !== tx) el.lastChild.textContent = tx;
+  }
+  for (const id in envEls) if (!live.has(+id)) { envEls[id].remove(); delete envEls[id]; }
+}
+
+/* ---------- panels ---------- */
+function regionStatus(rid) {
+  const L = leaderOf(rid), C = confOf(rid);
+  const liveVoters = C ? C.voters.filter(reach).length : 0, need = C ? quorum(C) : 2;
+  if (!L) return liveVoters < need ? ['bad', 'No quorum'] : ['warn', 'Electing'];
+  if (S.tasks[rid]) return ['info', S.tasks[rid].why === 'repair' ? 'Repairing' : 'Moving replica'];
+  if (L.voters.some(s => !reach(s))) return ['warn', 'Under-replicated'];
+  if (L.transfer) return ['info', 'Transferring leader'];
+  return ['ok', 'Healthy'];
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function renderInspector() {
+  const el = $('insp');
+  if (sel.kind === 'region' && !S.regions[sel.id]) sel = { kind: 'region', id: rids()[0] };
+  if (sel.kind === 'store') return renderStoreInsp(el, sel.id);
+  const rid = sel.id, g = S.regions[rid], L = leaderOf(rid), C = confOf(rid), [st, stLabel] = regionStatus(rid);
+  el.className = `panel inspector c${g.color}`;
+  const reps = repsOf(rid);
+  const summary = !L ? (st === 'bad' ? `Only ${C.voters.filter(reach).length} of ${C.voters.length} voters are reachable, fewer than the ${quorum(C)} a majority needs. This region cannot elect a leader or accept writes until a store comes back. Other regions are unaffected.`
+                                     : `No leader right now. Replicas are holding an election; writes to keys ${g.start}–${g.end - 1} are retried until one wins.`)
+    : `${sv(L.sid)} leads term ${L.term}. A write commits once ${quorum(L)} of ${L.voters.length} voters store it.${L.learners.length ? ` ${L.learners.map(sv).join(' ')} is a learner: it copies the log but doesn't vote yet.` : ''}`;
+  const rows = reps.map(r => {
+    const role = !alive(r.sid) ? 'down' : !isVoter(r) ? 'learner' : r.role === 'candidate' && r.pre ? 'candidate' : r.role;
+    const roleTxt = !alive(r.sid) ? 'down' : S.stores[r.sid].isolated ? 'cut off' : !isVoter(r) ? 'learner' : r.pre ? 'pre-cand.' : r.role;
+    const top = L ? lastIdx(L) : Math.max(...reps.map(lastIdx));
+    const have = L && r !== L ? (L.match[r.sid] || 0) : lastIdx(r);
+    const pct = top ? Math.round(100 * Math.min(1, have / top)) : 100;
+    const cls = !reach(r.sid) ? 'bad' : pct < 100 && r !== L ? 'wait' : '';
+    const extra = r.base > 0 ? `snap ≤ ${r.base}` : '';
+    return `<li class="${cls}"><button type="button" data-store="${r.sid}">S${r.sid}</button><span class="role ${role}">${roleTxt}</span>`
+      + `<span class="rbar"><span style="width:${pct}%"></span></span><span class="rnote">t${r.term} · ${have}/${top}${extra ? ' · ' + extra : ''}</span></li>`;
+  }).join('');
+  const T = S.tasks[rid];
+  el.innerHTML = `
+    <div class="insp-h"><h2><span class="rg c${g.color}" style="font-size:1.2rem;padding:4px 8px">R${rid}</span> <span class="chip ${st}">${stLabel}</span></h2>
+      <p>Keys ${g.start}–${g.end - 1} · its own Raft group, separate term and log from every other region.</p></div>
+    <p class="insp-sum">${summary}${T ? ` <br>Placement driver: moving the replica on ${sv(T.from)} to ${sv(T.to)} (step: ${{ add: 'add learner', catch: 'catch up, then promote', remove: 'remove old replica' }[T.stage]}).` : ''}</p>
+    <div class="tiles">
+      <div class="tile"><span class="tl">Leader</span><b>${L ? 'S' + L.sid : '—'}</b><small>${L ? 'term ' + L.term : 'electing'}</small></div>
+      <div class="tile"><span class="tl">Keys stored</span><b>${(L || C).kv.size}</b><small>splits at ${CFG.splitKeys}</small></div>
+      <div class="tile"><span class="tl">Committed</span><b>${(L || C).commit}</b><small>log index</small></div>
+      <div class="tile"><span class="tl">Voters</span><b>${C.voters.length}</b><small>majority ${quorum(C)}</small></div>
+    </div>
+    <div class="isec"><h3 class="isec-h">Replicas: progress vs. leader's log</h3><ul class="rlist">${rows}</ul></div>
+    <div class="isec"><h3 class="isec-h">Log tail per replica</h3><div class="logtail">${logTail(reps, L)}</div></div>
+    <div class="acts">
+      <span class="tl">Actions on R${rid}</span>
+      <button class="btn" type="button" data-act="split" ${!L || rids().length >= CFG.maxRegions || (L && L.kv.size < 2) ? 'disabled' : ''}>Split at median key</button>
+      ${L ? C.voters.filter(s => s !== L.sid).map(s => `<button class="btn" type="button" data-act="transfer" data-to="${s}" ${!reach(s) ? 'disabled' : ''}>Transfer leader → S${s}</button>`).join('') : ''}
+    </div>`;
+}
+function logTail(reps, L) {
+  const top = Math.max(...reps.map(lastIdx)), from = Math.max(1, top - 9);
+  const cols = []; for (let i = from; i <= top; i++) cols.push(i);
+  const head = `<div class="lt-row"><span></span>${cols.map(i => `<span class="lt-idx">${i}</span>`).join('')}</div>`;
+  const rows = reps.map(r => {
+    const cells = cols.map(i => {
+      if (i <= r.base) return `<span class="lc snap" title="compacted into snapshot"><small>snap</small></span>`;
+      if (i > lastIdx(r)) return `<span class="lc e"></span>`;
+      const e = r.log[i - r.base - 1], c = e.cmd;
+      const lab = c.op === 'put' ? 'k' + c.k : c.op === 'noop' ? 'no-op' : c.op === 'split' ? 'split' : { addLearner: '+L', promote: '↑V', remove: '−' }[c.type] + c.sid;
+      return `<span class="lc t${e.term % 6}${i > r.commit ? ' u' : ''}" title="index ${i}, term ${e.term}${i > r.commit ? ', not committed here yet' : ''}"><b>${e.term}</b><small>${esc(lab)}</small></span>`;
+    }).join('');
+    return `<div class="lt-row"><span>S${r.sid}</span>${cells}</div>`;
+  }).join('');
+  return `<div class="lt">${head}${rows}</div>`;
+}
+function renderStoreInsp(el, s) {
+  const st = S.stores[s], reps = repsOn(s), lc = leaderCounts();
+  el.className = 'panel inspector';
+  el.style.setProperty('--rc', !st.alive || st.isolated ? 'var(--danger)' : 'var(--accent)');
+  const state = !st.alive ? ['bad', 'Down'] : st.isolated ? ['bad', 'Cut off'] : ['ok', 'Up'];
+  const summary = !st.alive ? `${sv(s)} is down. The ${reps.length} replicas on it are frozen with their state on disk. Groups that still have a majority elsewhere keep serving.${S.pd ? ` After ${CFG.downAfter} ms the placement driver starts replacing these replicas on other stores.` : ''}`
+    : st.isolated ? `${sv(s)} is running but cut off. Its leaders lose contact with their followers and step down after ${CFG.eMax} ms (check-quorum). Its followers keep timing out; ${S.prevote ? 'pre-vote stops them from raising their terms.' : 'without pre-vote, their terms keep rising.'}`
+    : `${sv(s)} hosts ${reps.length} replicas and leads ${lc[s]} of ${rids().length} regions. One store is a follower in some groups and a leader in others, so the write load spreads out.`;
+  const rows = reps.map(r => {
+    const role = !isVoter(r) ? 'learner' : r.role;
+    const L = leaderOf(r.rid);
+    return `<li><button type="button" data-rid="${r.rid}"><span class="rg c${S.regions[r.rid] ? S.regions[r.rid].color : 0}">R${r.rid}</span></button>`
+      + `<span class="role ${role}">${r.pre ? 'pre-cand.' : role}</span><span class="rbar"><span style="width:${L ? Math.round(100 * Math.min(1, lastIdx(r) / Math.max(1, lastIdx(L)))) : 100}%"></span></span>`
+      + `<span class="rnote">term ${r.term} · commit ${r.commit} · ${r.kv.size} keys</span></li>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="insp-h"><h2>S${s} <span class="chip ${state[0]}">${state[1]}</span></h2><p>A store: one machine running many Raft replicas, sharing one network connection and one disk.</p></div>
+    <p class="insp-sum">${summary}</p>
+    <div class="tiles">
+      <div class="tile"><span class="tl">Replicas</span><b>${reps.length}</b><small>of ${rids().length} regions</small></div>
+      <div class="tile"><span class="tl">Leading</span><b>${lc[s]}</b><small>regions</small></div>
+      <div class="tile"><span class="tl">Learners</span><b>${reps.filter(r => !isVoter(r)).length}</b><small>catching up</small></div>
+      <div class="tile"><span class="tl">Keys held</span><b>${reps.reduce((a, r) => a + r.kv.size, 0)}</b><small>across replicas</small></div>
+    </div>
+    <div class="isec"><h3 class="isec-h">Replicas on S${s}</h3><ul class="rlist">${rows || '<li>No replicas</li>'}</ul></div>
+    <div class="acts">
+      <span class="tl">Fault injection</span>
+      ${st.alive ? `<button class="btn danger" type="button" data-act="crash">Crash S${s}</button>` : `<button class="btn good" type="button" data-act="restart">Restart S${s}</button>`}
+      ${st.isolated ? `<button class="btn good" type="button" data-act="heal">Reconnect S${s}</button>` : `<button class="btn danger" type="button" data-act="isolate">Cut S${s} off the network</button>`}
+    </div>`;
+}
+function renderKeys() {
+  const bar = $('keybar'), list = rids().sort((a, b) => S.regions[a].start - S.regions[b].start);
+  bar.innerHTML = list.map(rid => {
+    const g = S.regions[rid], L = leaderOf(rid);
+    return `<button type="button" class="kseg c${g.color}${sel.kind === 'region' && sel.id === rid ? ' sel' : ''}${L ? '' : ' noleader'}" data-rid="${rid}" style="flex-grow:${g.end - g.start}" title="R${rid}: keys ${g.start}–${g.end - 1}">`
+      + `<b>R${rid}</b><small>${L ? 'S' + L.sid : 'no leader'}</small></button>`;
+  }).join('');
+  const hot = S.workload === 'hot' ? `<i class="khot" style="left:${HOT[0] / 10}%;width:${(HOT[1] - HOT[0]) / 10}%"></i><b class="khot-l" style="left:${HOT[1] / 10}%">hot keys</b>` : '';
+  $('kaxis').innerHTML = [0, 250, 500, 750, 1000].map(k => `<span style="left:${k / 10}%">${k}</span>`).join('') + hot;
+  const rows = rids().sort((a, b) => S.regions[a].start - S.regions[b].start).map(rid => {
+    const g = S.regions[rid], L = leaderOf(rid), C = confOf(rid), [st, label] = regionStatus(rid);
+    const reps = [...C.voters.map(s => ({ s, cls: L && L.sid === s ? 'leader' : !reach(s) ? 'dead' : '' })), ...C.learners.map(s => ({ s, cls: 'learner' }))];
+    return `<tr class="${sel.kind === 'region' && sel.id === rid ? 'sel' : ''}" data-rid="${rid}"><td><button type="button" data-rid="${rid}"><span class="rg c${g.color}">R${rid}</span></button></td>`
+      + `<td>${g.start}–${g.end - 1}</td><td>${(L || C).kv.size}</td><td>${L ? 'S' + L.sid : '—'}</td><td>${L ? L.term : regionMaxTerm(rid)}</td><td>${(L || C).commit}</td>`
+      + `<td><span class="reps">${reps.map(x => `<span class="rp ${x.cls}">S${x.s}</span>`).join('')}</span></td><td><span class="chip ${st}">${label}</span></td></tr>`;
+  }).join('');
+  $('rtable').innerHTML = rows;
+}
+function renderMetrics() {
+  const { m, p, w } = rates();
+  $('m-msgs').textContent = m; $('m-pkts').textContent = p;
+  $('m-pkts-sub').textContent = S.batching ? 'one per store pair, every 5 ms' : 'batching off: one per message';
+  $('m-save').textContent = m ? Math.max(0, Math.round(100 * (1 - p / m))) + '%' : '—';
+  $('m-save-sub').textContent = S.batching ? 'by batching per store' : 'batching is off';
+  $('m-ok').textContent = S.stats.ok; $('m-ok-sub').textContent = w + ' / s';
+  $('m-fail').textContent = S.stats.fail;
+  const lc = leaderCounts(), mx = Math.max(1, ...Object.values(lc));
+  $('m-lead').innerHTML = STORES.map(s => `<div class="${reach(s) ? '' : 'off'}"><i style="height:${Math.max(2, Math.round(22 * lc[s] / mx))}px"></i>S${s}</div>`).join('');
+}
+const KIND = { elect: 'Election', lead: 'New leader', place: 'Placement', conf: 'Membership', split: 'Split', warn: 'Problem', ops: 'Your action' };
+function renderNarr() {
+  const ol = $('narr');
+  if (shown > S.events.length) shown = 0;
+  if (shown === S.events.length) return;
+  const frag = document.createDocumentFragment();
+  for (const e of S.events.slice(shown)) {
+    const li = document.createElement('li');
+    li.className = `k-${e.kind} fresh`;
+    li.innerHTML = `<div><div class="meta"><span class="tag">${KIND[e.kind]}</span><time>${e.t} ms</time></div><p class="msg">${e.html}</p></div>`;
+    frag.prepend(li);
+  }
+  ol.prepend(frag);
+  shown = S.events.length;
+  while (ol.children.length > 300) ol.lastChild.remove();
+  setTimeout(() => ol.querySelectorAll('.fresh').forEach(li => li.classList.remove('fresh')), 500);
+  $('narr-count').textContent = `${S.events.length} events`;
+}
+function renderStatus() {
+  $('st-time').textContent = S.t; $('st-regions').textContent = rids().length;
+  const sp = $('st-safe');
+  sp.className = 'chip ' + (S.violation ? 'bad' : 'ok'); sp.textContent = S.violation ? 'Violation: ' + S.violation : 'Safety checks pass';
+  $('st-live').classList.toggle('paused', !playing); $('st-live-t').textContent = playing ? 'Running' : 'Paused';
+}
+function renderAll(full) {
+  renderSVG(); renderStatus(); renderNarr();
+  if (full || uiTick++ % 8 === 0) { renderInspector(); renderKeys(); renderMetrics(); }
+}
+
+function frame(now) {
+  const dt = Math.min(100, now - last); last = now;
+  if (playing) {
+    acc += dt * SIM_PER_MS * speed;
+    let n = 0; while (acc >= 1 && n < 200) { step(); acc -= 1; n++; }
+    if (n >= 200) acc = 0;
+  }
+  renderAll(false);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- wiring ---------- */
+function init() {
+  $('scns').innerHTML = Object.entries(SCN).map(([k, s], i) =>
+    `<button class="scn" type="button" data-k="${k}" aria-pressed="false"><span class="eyebrow">Scenario ${i + 1}</span><strong>${s.label}</strong><span>${s.short}</span></button>`).join('');
+  $('scns').addEventListener('click', e => { const b = e.target.closest('.scn'); if (b) loadScenario(b.dataset.k, true); });
+  buildSVG();
+  const setPlay = p => { playing = p; const b = $('btn-play'); b.dataset.state = p ? 'playing' : 'paused'; b.lastChild.textContent = p ? 'Pause' : 'Play'; if (S) renderStatus(); };
+  setPlay(playing);
+  $('btn-play').onclick = () => setPlay(!playing);
+  $('btn-step').onclick = () => { setPlay(false); for (let i = 0; i < 10; i++) step(); renderAll(true); };
+  $('btn-reset').onclick = () => loadScenario(scnKey, false);
+  const main = $('main'), full = $('btn-full');
+  if (!main.requestFullscreen) full.hidden = true;
+  const toggleFull = () => document.fullscreenElement ? document.exitFullscreen() : main.requestFullscreen().catch(() => {});
+  full.onclick = toggleFull;
+  document.addEventListener('fullscreenchange', () => {
+    const on = document.fullscreenElement === main;
+    full.dataset.on = on; full.lastChild.textContent = on ? 'Exit full screen' : 'Full screen';
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key.toLowerCase() !== 'f' || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if (main.requestFullscreen) { e.preventDefault(); toggleFull(); }
+  });
+  $('speed').addEventListener('change', e => { speed = +e.target.value; });
+  $('workload').addEventListener('change', e => { S.workload = e.target.value; note('ops', `Client workload: ${{ off: 'off', uniform: 'writes spread over all keys', hot: '80% of writes go to keys 600–659' }[S.workload]}.`); renderAll(true); });
+  $('opt-batch').onchange = e => { S.batching = e.target.checked; note('ops', S.batching ? 'Batching on. Each store sends one packet per destination every 5 ms, carrying every group\'s messages.' : 'Batching off. Every Raft message of every group travels in its own packet.'); };
+  $('opt-pd').onchange = e => { S.pd = e.target.checked; note('ops', S.pd ? 'Placement driver on.' : 'Placement driver off: no rebalancing, no repair.'); };
+  $('opt-split').onchange = e => { S.autoSplit = e.target.checked; note('ops', S.autoSplit ? `Auto-split on: regions over ${CFG.splitKeys} keys split.` : 'Auto-split off.'); };
+  $('opt-prevote').onchange = e => { S.prevote = e.target.checked; note('ops', S.prevote ? 'Pre-vote on. A replica must win a trial vote before it raises its term.' : 'Pre-vote off. A replica whose timer fires raises its term right away.'); };
+  $('insp').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.store) { sel = { kind: 'store', id: +b.dataset.store }; return renderAll(true); }
+    if (b.dataset.rid) { sel = { kind: 'region', id: +b.dataset.rid }; return renderAll(true); }
+    const a = b.dataset.act;
+    if (sel.kind === 'store') ({ crash, restart, isolate, heal })[a](sel.id);
+    else {
+      const L = leaderOf(sel.id); if (!L) return;
+      if (a === 'split') proposeSplit(L, false);
+      if (a === 'transfer') { requestTransfer(L, +b.dataset.to); note('ops', `You ask ${sv(L.sid)} to hand leadership of ${R(sel.id)} to ${sv(+b.dataset.to)}. It pauses new writes, waits until ${sv(+b.dataset.to)} has the whole log, then sends TimeoutNow.`); }
+    }
+    renderAll(true);
+  });
+  const pickRegion = e => { const b = e.target.closest('[data-rid]'); if (b) { sel = { kind: 'region', id: +b.dataset.rid }; renderAll(true); } };
+  $('keybar').addEventListener('click', pickRegion);
+  $('rtable').addEventListener('click', pickRegion);
+  document.querySelector('.filters').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    filter = b.dataset.f; $('narr').dataset.filter = filter;
+    document.querySelectorAll('.filters button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  });
+  // Optional deep link: ?s=crash&t=6000 opens a scenario fast-forwarded to that simulated time.
+  const q = new URLSearchParams(location.search);
+  loadScenario(SCN[q.get('s')] ? q.get('s') : 'steady', false);
+  const ff = Math.min(60000, +q.get('t') || 0);
+  if (ff) { for (let i = 0; i < ff; i++) step(); renderAll(true); }
+  requestAnimationFrame(frame);
+}
+init();
+})();
+</script>
+</body>
+</html>

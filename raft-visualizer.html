@@ -137,6 +137,11 @@ code{font-family:var(--font-mono);font-size:.92em}
 .btn.tb svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .btn.tb .i-play{fill:currentColor}
 #btn-play[data-state="playing"] .i-play,#btn-play[data-state="paused"] .i-pause{display:none}
+#btn-full .i-exit,#btn-full[data-on="true"] .i-enter{display:none}
+#btn-full[data-on="true"] .i-exit{display:block}
+/* true fullscreen: the panel board fills the screen and scrolls, keeping the chosen layout */
+#board:fullscreen{background:var(--bg);padding:14px;gap:14px;overflow:auto;align-content:start}
+#board:fullscreen #sim{max-height:max(320px,calc(100vh - 360px))}
 #btn-part.on{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:color-mix(in srgb,var(--danger) 8%,var(--surface))}
 .speed{display:flex;padding:2px;margin:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);gap:2px}
 .speed legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -1064,6 +1069,7 @@ a.btn{text-decoration:none;display:inline-block}
               <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>
               <span>Pause</span></button>
             <button id="btn-step" class="btn tb" type="button" title="Run until the next message is delivered"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l9-7zM18 5v14"/></svg><span>Step</span></button>
+            <button id="btn-full" class="btn tb" type="button" title="Full screen (F)"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-enter" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path class="i-exit" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg><span>Full screen</span></button>
             <fieldset class="speed">
               <legend>Speed</legend>
               <label><input type="radio" name="speed" id="sp-1" value="0.25">¼×</label>
@@ -1939,6 +1945,21 @@ $('btn-here').addEventListener('click', () => sendTo(S.nodes[selected], false));
 $('btn-read-here').addEventListener('click', () => sendTo(S.nodes[selected], true));
 $('btn-read').addEventListener('click', () => readAny());
 addEventListener('resize', () => { logSig = ''; });
+{
+  const full = $('btn-full'), boardEl = $('board');
+  if (!boardEl.requestFullscreen) full.hidden = true;
+  const toggleFull = () => document.fullscreenElement ? document.exitFullscreen() : boardEl.requestFullscreen().catch(() => {});
+  full.addEventListener('click', toggleFull);
+  document.addEventListener('fullscreenchange', () => {
+    const on = document.fullscreenElement === boardEl;
+    full.dataset.on = on; full.lastChild.textContent = on ? 'Exit full screen' : 'Full screen';
+    logSig = '';
+  });
+  document.addEventListener('keydown', e => {
+    if (!simVisible || e.key.toLowerCase() !== 'f' || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if (boardEl.requestFullscreen) { e.preventDefault(); toggleFull(); }
+  });
+}
 
 /* ---------- movable panels ---------- */
 const LAYOUTS = {
