@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raft in Motion</title>
+<style>
+:root{
+  --bg:#ECEFF3; --surface:#FFFFFF; --ink:#16202C; --muted:#586477; --line:#D2D8E1; --accent:#2F6FDB;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0E131A; --surface:#151C26; --ink:#E3E8EF; --muted:#94A0B3; --line:#293343; --accent:#6EA2FF; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px 16px}
+main{width:100%;max-width:720px}
+h1{margin:0 0 6px;font-size:2rem}
+p.lead{margin:0 0 28px;color:var(--muted)}
+.cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+a.card{display:block;padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  color:inherit;text-decoration:none;transition:border-color .15s,transform .15s}
+a.card:hover{border-color:var(--accent);transform:translateY(-2px)}
+a.card h2{margin:0 0 6px;font-size:1.15rem;color:var(--accent)}
+a.card p{margin:0;color:var(--muted);font-size:.95rem}
+</style>
+</head>
+<body>
+<main>
+  <h1>Raft in Motion</h1>
+  <p class="lead">Interactive visualizations of the Raft consensus algorithm.</p>
+  <div class="cards">
+    <a class="card" href="raft-visualizer.html">
+      <h2>Raft Visualizer →</h2>
+      <p>Leader election, log replication and failures in a single Raft cluster.</p>
+    </a>
+    <a class="card" href="multi-raft-simulator.html">
+      <h2>Multi-Raft Simulator →</h2>
+      <p>Many Raft groups sharded across nodes, as used by real distributed databases.</p>
+    </a>
+  </div>
+</main>
+</body>
+</html>
